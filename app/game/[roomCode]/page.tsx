@@ -1,9 +1,26 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
 import { GameState, Player } from '@/types/game';
+import {
+  NarrativeTemplate,
+  getTravelNarrative,
+  getTaskNarrative,
+  getKillNarrative,
+  getReportNarrative,
+  getMeetingNarrative,
+  getIdleFlavor,
+} from '@/lib/narrative';
+
+// ── Narrative state ──────────────────────────────
+
+interface ActiveNarrative {
+  lines: string[];
+  choiceA: { label: string; result: string; action: () => void };
+  choiceB: { label: string; result: string; action: () => void };
+}
 
 export default function Game() {
   const params = useParams();
@@ -13,6 +30,15 @@ export default function Game() {
   const [chatMessage, setChatMessage] = useState('');
   const [timeLeft, setTimeLeft] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Narrative state
+  const [narrative, setNarrative] = useState<ActiveNarrative | null>(null);
+  const [revealedLines, setRevealedLines] = useState(0);
+  const [showChoices, setShowChoices] = useState(false);
+  const [resultText, setResultText] = useState<string | null>(null);
+
+  // Idle flavor
+  const [flavorLines, setFlavorLines] = useState<string[]>([]);
 
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
@@ -30,12 +56,10 @@ export default function Game() {
     if (persistentId) setPlayerId(persistentId);
   }, []);
 
-  // Countdown timer
+  // ── Timer countdown ──────────────────────────
+
   useEffect(() => {
-    if (!gameState?.timer) {
-      setTimeLeft(0);
-      return;
-    }
+    if (!gameState?.timer) { setTimeLeft(0); return; }
     const update = () => {
       const elapsed = Math.floor((Date.now() - gameState.timer!.startTime) / 1000);
       setTimeLeft(Math.max(0, gameState.timer!.duration - elapsed));
@@ -45,10 +69,43 @@ export default function Game() {
     return () => clearInterval(interval);
   }, [gameState?.timer?.startTime, gameState?.timer?.duration]);
 
-  // Auto-scroll chat
+  // ── Auto-scroll chat ─────────────────────────
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [gameState?.chat?.length]);
+
+  // ── Narrative line reveal ─────────────────────
+
+  useEffect(() => {
+    if (!narrative) return;
+    if (resultText) return; // don't reveal during result
+
+    if (revealedLines >= narrative.lines.length) {
+      const t = setTimeout(() => setShowChoices(true), 400);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setRevealedLines(r => r + 1), 600);
+    return () => clearTimeout(t);
+  }, [narrative, revealedLines, resultText]);
+
+  // ── Idle flavor text ──────────────────────────
+
+  useEffect(() => {
+    if (gameState?.phase !== 'playing' || narrative) return;
+    setFlavorLines([]);
+    const interval = setInterval(() => {
+      setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor()]);
+    }, 12000 + Math.random() * 8000);
+    return () => clearInterval(interval);
+  }, [gameState?.phase, !!narrative]);
+
+  // Clear flavor when moving
+  useEffect(() => {
+    setFlavorLines([]);
+  }, [gameState?.players?.[playerId]?.location]);
+
+  // ── Helpers ───────────────────────────────────
 
   const currentPlayer = gameState ? gameState.players[playerId] : null;
   const currentLocation = gameState?.locations.find(l => l.id === currentPlayer?.location);
@@ -71,26 +128,88 @@ export default function Game() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // --- Handlers ---
+  // ── Start a narrative ─────────────────────────
+
+  const startNarrative = useCallback((
+    template: NarrativeTemplate,
+    onA: () => void,
+    onB: () => void,
+  ) => {
+    setNarrative({
+      lines: template.lines,
+      choiceA: { ...template.choiceA, action: onA },
+      choiceB: { ...template.choiceB, action: onB },
+    });
+    setRevealedLines(0);
+    setShowChoices(false);
+    setResultText(null);
+    setFlavorLines([]);
+  }, []);
+
+  const handleNarrativeChoice = (choice: 'a' | 'b') => {
+    if (!narrative) return;
+    const chosen = choice === 'a' ? narrative.choiceA : narrative.choiceB;
+    setResultText(chosen.result);
+    setShowChoices(false);
+
+    setTimeout(() => {
+      chosen.action();
+      setNarrative(null);
+      setResultText(null);
+    }, 1800);
+  };
+
+  // ── Action handlers (with narrative) ──────────
 
   const handleMove = (locationId: string) => {
-    socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } }));
+    const dest = gameState?.locations.find(l => l.id === locationId);
+    const template = getTravelNarrative(dest?.name || 'somewhere');
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } })),
+      () => socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } })),
+    );
   };
 
   const handleKill = (victimId: string) => {
-    socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
+    const victim = gameState?.players[victimId];
+    const template = getKillNarrative(victim?.name || 'them');
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } })),
+      () => {}, // choice B: back out, do nothing
+    );
   };
 
   const handleCompleteTask = (taskId: string) => {
-    socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } }));
+    const task = gameState?.tasks.find(t => t.id === taskId);
+    const template = getTaskNarrative(task?.title || 'Task', task?.description || '');
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } })),
+      () => socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } })),
+    );
   };
 
   const handleReportBody = () => {
-    socket.send(JSON.stringify({ type: 'reportBody', playerId }));
+    const bodyPlayer = gameState?.deadBody
+      ? gameState.players[gameState.deadBody.playerId]
+      : null;
+    const template = getReportNarrative(bodyPlayer?.name || 'someone');
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
+      () => {}, // choice B: walk away
+    );
   };
 
   const handleCallMeeting = () => {
-    socket.send(JSON.stringify({ type: 'callMeeting', playerId }));
+    const template = getMeetingNarrative();
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'callMeeting', playerId })),
+      () => {}, // choice B: not yet
+    );
   };
 
   const handleSendChat = (e: React.FormEvent) => {
@@ -103,8 +222,6 @@ export default function Game() {
   const handleVote = (votedForId: string) => {
     socket.send(JSON.stringify({ type: 'vote', playerId, data: { votedForId } }));
   };
-
-  // --- Helpers ---
 
   const divider = () => <div className="text-[var(--dim)] my-3">{'═'.repeat(30)}</div>;
 
@@ -123,7 +240,7 @@ export default function Game() {
     return null;
   };
 
-  // --- Loading ---
+  // ── Loading states ────────────────────────────
 
   if (!gameState) {
     return (
@@ -139,17 +256,53 @@ export default function Game() {
       <div className="min-h-screen p-4 max-w-lg mx-auto mt-8">
         <p className="text-xl text-[var(--red)] glow-red">ERROR: PLAYER NOT FOUND</p>
         <p className="text-[var(--dim)] mt-2">Session may have expired.</p>
-        <button
-          onClick={() => window.location.href = '/'}
-          className="term-btn mt-4 text-xl"
-        >
+        <button onClick={() => window.location.href = '/'} className="term-btn mt-4 text-xl">
           [RETURN TO MAIN MENU]
         </button>
       </div>
     );
   }
 
-  // --- GAME OVER ---
+  // ── NARRATIVE SCREEN ──────────────────────────
+
+  if (narrative) {
+    return (
+      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col justify-center">
+        <div>
+          {narrative.lines.slice(0, revealedLines).map((line, i) => (
+            <p key={i} className="text-xl mb-2 glow">{line}</p>
+          ))}
+
+          {revealedLines < narrative.lines.length && (
+            <span className="cursor-blink text-xl">&#9612;</span>
+          )}
+
+          {showChoices && !resultText && (
+            <div className="mt-6">
+              <button
+                onClick={() => handleNarrativeChoice('a')}
+                className="term-btn text-xl"
+              >
+                {'> '}{narrative.choiceA.label}
+              </button>
+              <button
+                onClick={() => handleNarrativeChoice('b')}
+                className="term-btn text-xl text-[var(--dim)]"
+              >
+                {'> '}{narrative.choiceB.label}
+              </button>
+            </div>
+          )}
+
+          {resultText && (
+            <p className="text-lg text-[var(--dim)] mt-6 glow">{resultText}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── GAME OVER ─────────────────────────────────
 
   if (gameState.phase === 'gameOver') {
     const allPlayers = Object.values(gameState.players);
@@ -160,7 +313,7 @@ export default function Game() {
           {gameState.winner === 'innocents' ? (
             <div>
               <p className="text-2xl glow text-center">INNOCENTS WIN</p>
-              <p className="text-[var(--dim)] text-center mt-1">All impostors eliminated.</p>
+              <p className="text-[var(--dim)] text-center mt-1">The impostor has been stopped.</p>
             </div>
           ) : (
             <div>
@@ -183,10 +336,7 @@ export default function Game() {
           ))}
 
           <div className="mt-8">
-            <button
-              onClick={() => window.location.href = '/'}
-              className="term-btn glow text-xl"
-            >
+            <button onClick={() => window.location.href = '/'} className="term-btn glow text-xl">
               [PLAY AGAIN]
             </button>
           </div>
@@ -195,7 +345,7 @@ export default function Game() {
     );
   }
 
-  // --- RESULTS ---
+  // ── RESULTS ───────────────────────────────────
 
   if (gameState.phase === 'results') {
     const ejected = getEjectedPlayer();
@@ -230,7 +380,7 @@ export default function Game() {
     );
   }
 
-  // --- VOTING ---
+  // ── VOTING ────────────────────────────────────
 
   if (gameState.phase === 'voting') {
     const alivePlayers = Object.values(gameState.players).filter(p => p.status === 'alive');
@@ -240,12 +390,12 @@ export default function Game() {
       <div className="min-h-screen p-4 max-w-lg mx-auto">
         <div className="mt-8">
           {divider()}
-          <p className="text-xl text-center">VOTE: WHO IS THE IMPOSTOR?</p>
-          <p className="text-[var(--amber)] text-center glow-amber">[{formatTime(timeLeft)} remaining]</p>
+          <p className="text-xl text-center">WHO IS THE IMPOSTOR?</p>
+          <p className="text-[var(--amber)] text-center glow-amber">[{formatTime(timeLeft)}]</p>
           {divider()}
 
           {currentPlayer.status === 'dead' ? (
-            <p className="text-[var(--dim)] mt-4">(You are dead. Observing vote.)</p>
+            <p className="text-[var(--dim)] mt-4">(You are dead. Observing.)</p>
           ) : hasVoted ? (
             <div className="mt-4">
               <p className="text-[var(--dim)]">Vote cast. Waiting for others...</p>
@@ -259,8 +409,9 @@ export default function Game() {
                   onClick={() => handleVote(p.id)}
                   className={`term-btn text-lg ${p.id === playerId ? 'text-[var(--dim)]' : ''}`}
                 >
+                  {'> '}
                   <span style={{ color: p.id === playerId ? undefined : p.color }}>
-                    [{p.name} ({p.icon})]
+                    {p.name} ({p.icon})
                   </span>
                   {p.id === playerId && <span> (you)</span>}
                 </button>
@@ -269,7 +420,7 @@ export default function Game() {
                 onClick={() => handleVote('skip')}
                 className="term-btn term-btn-amber text-lg mt-2"
               >
-                [SKIP VOTE]
+                {'> '}SKIP VOTE
               </button>
             </div>
           )}
@@ -278,7 +429,7 @@ export default function Game() {
     );
   }
 
-  // --- MEETING ---
+  // ── MEETING ───────────────────────────────────
 
   if (gameState.phase === 'meeting') {
     return (
@@ -288,14 +439,13 @@ export default function Game() {
           <p className="text-xl text-center text-[var(--amber)] glow-amber">
             {gameState.deadBody ? '!! BODY REPORTED !!' : '!! EMERGENCY MEETING !!'}
           </p>
-          <p className="text-[var(--amber)] text-center">[{formatTime(timeLeft)} remaining]</p>
+          <p className="text-[var(--amber)] text-center">[{formatTime(timeLeft)}]</p>
           {divider()}
         </div>
 
-        {/* Chat messages */}
         <div className="flex-1 overflow-y-auto my-4 min-h-[200px] max-h-[50vh]">
           {gameState.chat.length === 0 && (
-            <p className="text-[var(--dim)]">No messages yet. Discuss!</p>
+            <p className="text-[var(--dim)]">Silence. Someone needs to talk first.</p>
           )}
           {gameState.chat.map(msg => {
             const sender = gameState.players[msg.playerId];
@@ -311,7 +461,6 @@ export default function Game() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Chat input */}
         {currentPlayer.status === 'alive' ? (
           <form onSubmit={handleSendChat} className="flex gap-2 pb-4">
             <span className="text-[var(--dim)] text-xl mt-1">{'>'}</span>
@@ -320,19 +469,19 @@ export default function Game() {
               value={chatMessage}
               onChange={(e) => setChatMessage(e.target.value)}
               className="term-input flex-1"
-              placeholder="type message..."
+              placeholder="speak..."
               maxLength={200}
               autoFocus
             />
           </form>
         ) : (
-          <p className="text-[var(--dim)] pb-4">(You are dead. You can only observe.)</p>
+          <p className="text-[var(--dim)] pb-4">(You are dead. You can only listen.)</p>
         )}
       </div>
     );
   }
 
-  // --- MAIN PLAYING PHASE ---
+  // ── MAIN PLAYING PHASE ────────────────────────
 
   const othersHere = playersHere.filter(p => p.id !== playerId);
   const killTargets = currentPlayer.role === 'impostor'
@@ -384,12 +533,12 @@ export default function Game() {
 
       {currentPlayer.status === 'alive' ? (
         <>
-          {/* Dead body alert */}
+          {/* Dead body */}
           {gameState.deadBody && (
             <div className="mb-4">
               <p className="text-[var(--red)] glow-red text-lg">!! A BODY HAS BEEN FOUND !!</p>
               <button className="term-btn term-btn-red text-lg" onClick={handleReportBody}>
-                [REPORT BODY]
+                {'> '}Report body
               </button>
             </div>
           )}
@@ -404,9 +553,8 @@ export default function Game() {
                   className="term-btn term-btn-red text-lg"
                   onClick={() => handleKill(p.id)}
                 >
-                  <span>[&#9760; Kill </span>
+                  {'> '}
                   <span style={{ color: p.color }}>{p.name}</span>
-                  <span>]</span>
                 </button>
               ))}
             </div>
@@ -422,9 +570,7 @@ export default function Game() {
                   className="term-btn text-lg"
                   onClick={() => handleCompleteTask(task.id)}
                 >
-                  <span>[{task.title}]</span>
-                  <br />
-                  <span className="text-[var(--dim)] text-base">  &quot;{task.description}&quot;</span>
+                  {'> '}{task.title}
                 </button>
               ))}
             </div>
@@ -441,7 +587,7 @@ export default function Game() {
                   className="term-btn text-lg"
                   onClick={() => handleMove(locId)}
                 >
-                  [{loc?.name}]
+                  {'> '}{loc?.name}
                 </button>
               );
             })}
@@ -449,12 +595,11 @@ export default function Game() {
 
           {/* Actions */}
           <div className="mb-4">
-            <p className="text-lg">ACTIONS:</p>
             <button
               className="term-btn term-btn-amber text-lg"
               onClick={handleCallMeeting}
             >
-              [CALL EMERGENCY MEETING]
+              {'> '}Call emergency meeting
             </button>
           </div>
         </>
@@ -462,8 +607,17 @@ export default function Game() {
         <p className="text-[var(--dim)] mt-6 text-lg">(You are dead. You can only observe.)</p>
       )}
 
+      {/* Idle flavor text */}
+      {flavorLines.length > 0 && (
+        <div className="mt-4">
+          {flavorLines.map((line, i) => (
+            <p key={i} className="text-[var(--dim)] text-base italic">{line}</p>
+          ))}
+        </div>
+      )}
+
       {/* Cursor */}
-      <p className="mt-6">
+      <p className="mt-4">
         <span className="text-[var(--dim)]">{'> '}</span>
         <span className="cursor-blink">&#9612;</span>
       </p>
