@@ -187,6 +187,15 @@ const GENERIC_TRAVEL: NarrativeTemplate[] = [
 ];
 
 export function getTravelNarrative(destinationName: string, destinationId?: string): NarrativeTemplate {
+  // ~1% chance of easter egg travel narrative
+  if (Math.random() < EASTER_EGG_CHANCE) {
+    const base = pickRandom(EASTER_EGG_TRAVEL);
+    return {
+      lines: [`You head toward ${destinationName}.`, ...base.lines],
+      choiceA: base.choiceA,
+      choiceB: base.choiceB,
+    };
+  }
   const isOutside = destinationId ? OUTSIDE_IDS.has(destinationId) : false;
   const pool = isOutside
     ? [...OUTSIDE_TRAVEL, ...GENERIC_TRAVEL]
@@ -292,6 +301,15 @@ const KILL_NARRATIVES: {
 ];
 
 export function getKillNarrative(victimName: string): NarrativeTemplate {
+  // ~1% chance of easter egg kill narrative
+  if (Math.random() < EASTER_EGG_CHANCE) {
+    const t = pickRandom(EASTER_EGG_KILL);
+    return {
+      lines: t.lines(victimName),
+      choiceA: { label: t.choiceA.label, result: t.choiceA.getResult(victimName) },
+      choiceB: { label: t.choiceB.label, result: t.choiceB.result },
+    };
+  }
   const t = pickRandom(KILL_NARRATIVES);
   return {
     lines: t.lines(victimName),
@@ -449,7 +467,73 @@ const GENERIC_IDLE = [
   "The temperature drops. Just for a second.",
 ];
 
+// ── EASTER EGGS ──────────────────────────────────
+// ~1% chance per event. Across a full 10-min game with 5 players,
+// maybe 1-2 people total will see one. Rare enough to screenshot.
+
+const EASTER_EGG_CHANCE = 0.01;
+
+const EASTER_EGG_IDLE = [
+  "The whiteboard flickers. 'SKIBIDI.' Then goes blank.",
+  "A locker has a sticker inside: 'mewing zone. do not disturb.'",
+  "Someone carved 'what the sigma' into a desk.",
+  "A note falls from a locker: 'the impostor has no rizz.'",
+  "The smart board shows a leaderboard. 'AURA POINTS.' Your name is last.",
+  "The PA system plays a familiar tune. 'We're no strangers to love...' Then cuts out.",
+  "You find a hall pass on the floor. It just says 'only in Ohio.'",
+  "Someone left a notebook open. Every page just says 'fanum tax.'",
+  "The whiteboard says 'L + ratio.' In the teacher's handwriting.",
+  "A kid's planner is open to today. It says 'go touch grass.' Today is circled in red.",
+  "Graffiti on the wall: 'the impostor is not sigma.'",
+  "A pigeon walks up to you. It's mewing. You're not sure how.",
+  "A CVS receipt blows past. It's 6 feet long. For one item.",
+  "Your phone buzzes. Text from unknown: 'you have negative aura rn.'",
+  "Someone left a note: 'if you're reading this, you have zero rizz.'",
+  "Your phone autocorrects 'help' to 'skibidi.' Three times.",
+  "You hear faint music. 'Never gonna give you up...' It's coming from inside the walls.",
+  "Someone stands perfectly still in the corner. Total NPC behavior.",
+];
+
+const EASTER_EGG_TRAVEL: NarrativeTemplate[] = [
+  {
+    lines: [
+      "You turn the corner.",
+      "Someone is standing there.",
+      "Perfectly still. Staring at the wall.",
+      "They're... mewing?",
+    ],
+    choiceA: { label: "Walk past them", result: "They don't move. Their jawline does look sharper though." },
+    choiceB: { label: "Say something", result: "They turn. 'I'm on a sigma grindset.' Then they're gone." },
+  },
+  {
+    lines: [
+      "You pass a bodega.",
+      "The cat in the window stares at you.",
+      "It slowly shakes its head.",
+      "Like it knows something you don't.",
+    ],
+    choiceA: { label: "Keep walking", result: "The cat watches you leave. Judging." },
+    choiceB: { label: "Stare back", result: "It mouths something. Was that... 'sussy baka'?" },
+  },
+];
+
+const EASTER_EGG_KILL: {
+  lines: (name: string) => string[];
+  choiceA: { label: string; getResult: (name: string) => string };
+  choiceB: { label: string; result: string };
+}[] = [
+  {
+    lines: (name) => [`${name} is right there.`, "They don't see you.", "This is your moment.", "Fanum tax time."],
+    choiceA: { label: "Tax them", getResult: (n) => `${n} has been taxed. Permanently.` },
+    choiceB: { label: "No cap, walk away", result: "You back off. The grindset can wait." },
+  },
+];
+
 export function getIdleFlavor(locationId?: string): string {
+  // ~1% chance of easter egg
+  if (Math.random() < EASTER_EGG_CHANCE) {
+    return pickRandom(EASTER_EGG_IDLE);
+  }
   const isOutside = locationId ? OUTSIDE_IDS.has(locationId) : false;
   const pool = isOutside
     ? [...OUTSIDE_IDLE, ...GENERIC_IDLE]
