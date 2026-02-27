@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+:root {
+  --green: #00ff41;
+  --amber: #ffb000;
+  --red: #ff0040;
+  --cyan: #00ffff;
+  --magenta: #ff00ff;
+  --bg: #0a0a0a;
+  --dim: rgba(0, 255, 65, 0.4);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--green);
+  overflow-x: hidden;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+input, button, textarea, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Scanlines overlay */
+.scanlines {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Vignette */
+.vignette {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-shadow: inset 0 0 150px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* Phosphor glow */
+.glow {
+  text-shadow:
+    0 0 5px rgba(0, 255, 65, 0.6),
+    0 0 10px rgba(0, 255, 65, 0.4),
+    0 0 20px rgba(0, 255, 65, 0.2);
+}
+
+.glow-red {
+  text-shadow:
+    0 0 5px rgba(255, 0, 64, 0.6),
+    0 0 10px rgba(255, 0, 64, 0.4);
+}
+
+.glow-amber {
+  text-shadow:
+    0 0 5px rgba(255, 176, 0, 0.6),
+    0 0 10px rgba(255, 176, 0, 0.4);
+}
+
+/* Subtle flicker */
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  92.5% { opacity: 1; }
+  93% { opacity: 0.88; }
+  93.5% { opacity: 1; }
+  97% { opacity: 1; }
+  97.5% { opacity: 0.92; }
+  98% { opacity: 1; }
+}
+
+.terminal-flicker {
+  animation: flicker 5s infinite;
+}
+
+/* Blinking cursor */
+@keyframes blink {
+  0%, 49.9% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+  color: var(--green);
+}
+
+/* Terminal button */
+.term-btn {
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 10px 16px;
+  width: 100%;
+  font-size: 1.3rem;
+  line-height: 1.4;
+  transition: background 0.1s;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  color: var(--green);
+}
+
+.term-btn:hover {
+  background: rgba(0, 255, 65, 0.1);
+}
+
+.term-btn:active {
+  background: rgba(0, 255, 65, 0.25);
+}
+
+.term-btn-red {
+  color: var(--red);
+}
+
+.term-btn-red:hover {
+  background: rgba(255, 0, 64, 0.1);
+}
+
+.term-btn-red:active {
+  background: rgba(255, 0, 64, 0.25);
+}
+
+.term-btn-amber {
+  color: var(--amber);
+}
+
+.term-btn-amber:hover {
+  background: rgba(255, 176, 0, 0.1);
+}
+
+.term-btn-amber:active {
+  background: rgba(255, 176, 0, 0.25);
+}
+
+/* Terminal input */
+.term-input {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--green);
+  color: var(--green);
+  font-size: 1.3rem;
+  outline: none;
+  caret-color: var(--green);
+  padding: 8px 4px;
+  width: 100%;
+}
+
+.term-input::placeholder {
+  color: var(--dim);
+}
+
+.term-input:focus {
+  border-bottom-color: var(--green);
+  box-shadow: 0 2px 8px rgba(0, 255, 65, 0.3);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 65, 0.5);
+}
+
+/* Selection */
+::selection {
+  background: rgba(0, 255, 65, 0.3);
+  color: var(--green);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .terminal-flicker {
+    animation: none;
+  }
+  .cursor-blink {
+    animation: none;
+    opacity: 1;
+  }
+}
