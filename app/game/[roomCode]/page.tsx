@@ -99,7 +99,7 @@ export default function Game() {
     if (gameState?.phase !== 'playing' || narrative) return;
     setFlavorLines([]);
     const interval = setInterval(() => {
-      setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor()]);
+      setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor(currentPlayer?.location)]);
     }, 12000 + Math.random() * 8000);
     return () => clearInterval(interval);
   }, [gameState?.phase, !!narrative]);
@@ -195,7 +195,7 @@ export default function Game() {
 
   const handleMove = (locationId: string) => {
     const dest = gameState?.locations.find(l => l.id === locationId);
-    const template = getTravelNarrative(dest?.name || 'somewhere');
+    const template = getTravelNarrative(dest?.name || 'somewhere', locationId);
     startNarrative(
       template,
       () => socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } })),

@@ -9,9 +9,127 @@ function pickRandom<T>(arr: T[]): T {
 }
 
 // ── TRAVEL ────────────────────────────────────────
-// All generic — no school-specific references (works for CVS, Boulevard, Terrace too)
 
-const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
+const OUTSIDE_IDS = new Set(['cvs', 'boulevard', 'terrace']);
+
+// School hallways, classrooms, lockers — the Speyer vibe
+const SCHOOL_TRAVEL: NarrativeTemplate[] = [
+  {
+    lines: [
+      "The hallway stretches ahead.",
+      "A locker slams somewhere behind you.",
+      "You didn't see anyone.",
+    ],
+    choiceA: { label: "Keep moving", result: "Your shoes squeak on the linoleum. Too loud." },
+    choiceB: { label: "Check the locker", result: "Closed. Locked. But warm to the touch." },
+  },
+  {
+    lines: [
+      "You pass a classroom.",
+      "The door is open.",
+      "Desks arranged in a circle. All facing inward.",
+    ],
+    choiceA: { label: "Don't go in", result: "You keep walking. The door clicks shut behind you." },
+    choiceB: { label: "Look inside", result: "Empty. But the whiteboard says 'WE SEE YOU.'" },
+  },
+  {
+    lines: [
+      "A bulletin board catches your eye.",
+      "Someone pinned a note.",
+      "It just says your name.",
+    ],
+    choiceA: { label: "Tear it down", result: "You rip it off. Underneath is another one." },
+    choiceB: { label: "Leave it", result: "You walk on. You feel it watching your back." },
+  },
+  {
+    lines: [
+      "The water fountain gurgles.",
+      "On its own.",
+      "The water runs red for a second. Then clear.",
+    ],
+    choiceA: { label: "Keep going", result: "You hear it gurgle again behind you." },
+    choiceB: { label: "Look closer", result: "Clear water. Normal. Your reflection in it isn't." },
+  },
+  {
+    lines: [
+      "A pencil rolls off a desk nearby.",
+      "Slowly. Against the slope.",
+      "It points at you.",
+    ],
+    choiceA: { label: "Step over it", result: "It rolls to follow. Then stops." },
+    choiceB: { label: "Pick it up", result: "Cold. Like it's been in a freezer." },
+  },
+  {
+    lines: [
+      "Chalk dust hangs in the air.",
+      "You didn't see anyone writing.",
+      "The board says 'DON'T TURN AROUND.'",
+    ],
+    choiceA: { label: "Don't turn around", result: "Smart. You keep walking. Faster." },
+    choiceB: { label: "Turn around", result: "Nothing. The chalk dust settles. The board is blank now." },
+  },
+  {
+    lines: [
+      "A classroom door opens as you approach.",
+      "No one inside.",
+      "The smart board flickers on. Static.",
+    ],
+    choiceA: { label: "Go through", result: "The static stops the moment you enter." },
+    choiceB: { label: "Find another way", result: "All the other doors are locked. Of course." },
+  },
+];
+
+// Streets, sidewalks, storefronts — outside Speyer
+const OUTSIDE_TRAVEL: NarrativeTemplate[] = [
+  {
+    lines: [
+      "The sidewalk feels different out here.",
+      "The city noise should be comforting.",
+      "It isn't.",
+    ],
+    choiceA: { label: "Walk faster", result: "Your footsteps echo off the storefronts." },
+    choiceB: { label: "Look around", result: "No one on the street. That's... unusual." },
+  },
+  {
+    lines: [
+      "The wind picks up.",
+      "It carries something. A whisper?",
+      "No. Just the wind. Probably.",
+    ],
+    choiceA: { label: "Ignore it", result: "The wind dies. The whisper doesn't." },
+    choiceB: { label: "Listen", result: "Your name. It said your name. ...Did it?" },
+  },
+  {
+    lines: [
+      "A streetlight flickers as you pass.",
+      "Then the next one.",
+      "Then the next. Following you.",
+    ],
+    choiceA: { label: "Don't look up", result: "They steady behind you. Only the one ahead flickers." },
+    choiceB: { label: "Stop and wait", result: "They all go dark. Then snap back on. You're not alone." },
+  },
+  {
+    lines: [
+      "The street is empty.",
+      "No cars. No people.",
+      "Just you and the feeling of being watched.",
+    ],
+    choiceA: { label: "Keep your head down", result: "You make it. Something was behind you. You're sure of it." },
+    choiceB: { label: "Scan the windows", result: "A curtain moves. Third floor. No one there now." },
+  },
+  {
+    lines: [
+      "A shop door swings open as you walk by.",
+      "The sign says CLOSED.",
+      "Inside is dark.",
+    ],
+    choiceA: { label: "Keep walking", result: "The door closes on its own. The lock clicks." },
+    choiceB: { label: "Peer inside", result: "Empty shelves. Except for a note: 'WRONG WAY.'" },
+  },
+];
+
+// Work anywhere — shadows, footsteps, general creepy
+const GENERIC_TRAVEL: NarrativeTemplate[] = [
   {
     lines: [
       "The path ahead is quiet.",
@@ -20,15 +138,6 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
     ],
     choiceA: { label: "Keep moving", result: "You press on. Nothing follows. Probably." },
     choiceB: { label: "Pause and listen", result: "Silence. The kind that listens back." },
-  },
-  {
-    lines: [
-      "You round the corner.",
-      "The air feels heavier here.",
-      "A door behind you swings shut on its own.",
-    ],
-    choiceA: { label: "Ignore it", result: "You keep going. It clicks shut behind you." },
-    choiceB: { label: "Look back", result: "Nothing there. But warm. Like someone just left." },
   },
   {
     lines: [
@@ -41,39 +150,12 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
   },
   {
     lines: [
-      "A door ahead creaks open.",
-      "Slowly. No one is there.",
-      "The hinges groan in the stillness.",
-    ],
-    choiceA: { label: "Go through", result: "You step through. It swings shut behind you." },
-    choiceB: { label: "Find another way", result: "There is no other way. You go through anyway." },
-  },
-  {
-    lines: [
       "You pass a window.",
       "Your reflection moves.",
       "Half a second too late.",
     ],
     choiceA: { label: "Don't look again", result: "You keep your eyes forward. Smart." },
     choiceB: { label: "Look closer", result: "Your reflection stares back. Then smiles. You didn't smile." },
-  },
-  {
-    lines: [
-      "The ground feels wrong underfoot.",
-      "Like everything is shifting.",
-      "Rearranging when you're not looking.",
-    ],
-    choiceA: { label: "Trust your sense of direction", result: "You press forward. Things settle. For now." },
-    choiceB: { label: "Stop and get your bearings", result: "You pause. Everything looks normal. Almost." },
-  },
-  {
-    lines: [
-      "A pipe groans inside the wall.",
-      "Then stops.",
-      "Then groans again. Rhythmic. Like breathing.",
-    ],
-    choiceA: { label: "It's just pipes", result: "Sure. Pipes that breathe. Totally normal." },
-    choiceB: { label: "Press your ear to the wall", result: "The groaning stops the moment you touch it." },
   },
   {
     lines: [
@@ -95,24 +177,6 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
   },
   {
     lines: [
-      "Something crunches under your shoe.",
-      "Glass. From somewhere above.",
-      "You look up. Everything's intact.",
-    ],
-    choiceA: { label: "Keep going", result: "Crunch. Crunch. Then solid ground again." },
-    choiceB: { label: "Pick up a piece", result: "Cold to the touch. Colder than it should be." },
-  },
-  {
-    lines: [
-      "You smell something.",
-      "Dust. Old paper.",
-      "And something metallic. Like blood.",
-    ],
-    choiceA: { label: "Breathe through your mouth", result: "The smell fades. Your mouth tastes like copper." },
-    choiceB: { label: "Follow the smell", result: "It leads nowhere. And everywhere." },
-  },
-  {
-    lines: [
       "A shadow slides across the wall.",
       "Yours is behind you.",
       "This one is ahead.",
@@ -122,8 +186,12 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
   },
 ];
 
-export function getTravelNarrative(destinationName: string): NarrativeTemplate {
-  const base = pickRandom(TRAVEL_NARRATIVES);
+export function getTravelNarrative(destinationName: string, destinationId?: string): NarrativeTemplate {
+  const isOutside = destinationId ? OUTSIDE_IDS.has(destinationId) : false;
+  const pool = isOutside
+    ? [...OUTSIDE_TRAVEL, ...GENERIC_TRAVEL]
+    : [...SCHOOL_TRAVEL, ...GENERIC_TRAVEL];
+  const base = pickRandom(pool);
   return {
     lines: [`You head toward ${destinationName}.`, ...base.lines],
     choiceA: base.choiceA,
@@ -336,13 +404,35 @@ export function getMeetingNarrative(): NarrativeTemplate {
 }
 
 // ── IDLE FLAVOR ───────────────────────────────────
-// All generic — work indoors, outdoors, CVS, anywhere
 
-export const IDLE_FLAVOR = [
+const SCHOOL_IDLE = [
+  "A locker clicks open on its own.",
+  "The PA crackles. Static. Silence.",
+  "Chalk dust drifts past. No one is writing.",
+  "A desk scrapes across the floor. No one is sitting there.",
+  "The bell rings. But it's not time.",
+  "Someone wrote something on the whiteboard. It wasn't there before.",
+  "A pencil rolls off a desk. Slowly. Uphill.",
+  "The smart board turns on. Shows your name. Then off.",
+  "You hear a locker combination clicking. Spin. Spin. Click.",
+  "A backpack sits in the hallway. It wasn't there a minute ago.",
+  "The hallway lights flicker in sequence. Toward you.",
+  "A classroom door drifts open. The room is dark inside.",
+];
+
+const OUTSIDE_IDLE = [
+  "A car alarm goes off. Then stops mid-beep.",
+  "The streetlight above you buzzes. Then pops.",
+  "A plastic bag tumbles past. Against the wind.",
+  "You hear a shopping cart rolling. No one is pushing it.",
+  "The neon sign flickers. ON. OFF. ON.",
+  "A pigeon watches you. It hasn't blinked.",
+];
+
+const GENERIC_IDLE = [
   "The lights flicker.",
   "A door slams somewhere distant.",
   "You hear footsteps. Then nothing.",
-  "The PA crackles. Static. Silence.",
   "Something moved in your peripheral vision.",
   "A clock ticks. But not forward.",
   "A cold draft from nowhere.",
@@ -350,21 +440,19 @@ export const IDLE_FLAVOR = [
   "The ground vibrates. Once. Like a heartbeat.",
   "Your phone buzzes. No notification.",
   "A hum. Low. Constant. Then gone.",
-  "Something small hits the ground nearby. You can't find it.",
   "The EXIT sign flickers. E-X-I-",
   "You feel eyes on you.",
   "A whisper. Too quiet to make out.",
-  "A drain gurgles. Then silence.",
   "A shadow crosses the wall. Nothing cast it.",
-  "The path behind you looks longer than before.",
-  "Metal clicks somewhere. Open. Shut.",
   "The air pressure changes. Your ears pop.",
   "Something scratches behind the wall.",
-  "Something shifts above you.",
-  "A child's laugh echoes. From where?",
   "The temperature drops. Just for a second.",
 ];
 
-export function getIdleFlavor(): string {
-  return pickRandom(IDLE_FLAVOR);
+export function getIdleFlavor(locationId?: string): string {
+  const isOutside = locationId ? OUTSIDE_IDS.has(locationId) : false;
+  const pool = isOutside
+    ? [...OUTSIDE_IDLE, ...GENERIC_IDLE]
+    : [...SCHOOL_IDLE, ...GENERIC_IDLE];
+  return pickRandom(pool);
 }
