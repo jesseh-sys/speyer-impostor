@@ -107,7 +107,7 @@ export const KILL_ANIMATIONS = [
 ];
 
 export const GAME_CONFIG = {
-  MIN_PLAYERS: 5,
+  MIN_PLAYERS: 3,
   MAX_PLAYERS: 15,
   DISCUSSION_TIME: 45,
   VOTING_TIME: 30,

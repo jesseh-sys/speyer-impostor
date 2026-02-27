@@ -204,6 +204,10 @@ export default class GameServer implements Party.Server {
   handleReportBody(msg: ClientMessage) {
     if (!this.gameState || !this.gameState.deadBody) return;
 
+    // Reporter must be at the body's location
+    const reporter = this.gameState.players[msg.playerId];
+    if (!reporter || reporter.location !== this.gameState.deadBody.location) return;
+
     this.gameState.deadBody.reportedBy = msg.playerId;
     this.startMeeting();
   }

@@ -10,6 +10,7 @@ import {
   getTaskNarrative,
   getKillNarrative,
   getReportNarrative,
+  getDiscoveryNarrative,
   getMeetingNarrative,
   getIdleFlavor,
 } from '@/lib/narrative';
@@ -39,6 +40,9 @@ export default function Game() {
 
   // Idle flavor
   const [flavorLines, setFlavorLines] = useState<string[]>([]);
+
+  // Body discovery tracking
+  const discoveredBodyRef = useRef<string | null>(null);
 
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
@@ -105,10 +109,38 @@ export default function Game() {
     setFlavorLines([]);
   }, [gameState?.players?.[playerId]?.location]);
 
-  // ── Helpers ───────────────────────────────────
-
+  // ── Derived values (needed by effects below) ──
   const currentPlayer = gameState ? gameState.players[playerId] : null;
   const currentLocation = gameState?.locations.find(l => l.id === currentPlayer?.location);
+
+  // ── Body discovery ──────────────────────────
+
+  // Clear discovery tracking when body is cleared (after meeting)
+  useEffect(() => {
+    if (!gameState?.deadBody) {
+      discoveredBodyRef.current = null;
+    }
+  }, [gameState?.deadBody]);
+
+  // Auto-trigger discovery narrative when entering a room with a body
+  useEffect(() => {
+    if (narrative) return;
+    if (!gameState?.deadBody || !currentPlayer) return;
+    if (currentPlayer.status === 'dead') return;
+    if (currentPlayer.location !== gameState.deadBody.location) return;
+    if (discoveredBodyRef.current === gameState.deadBody.playerId) return;
+
+    discoveredBodyRef.current = gameState.deadBody.playerId;
+    const bodyPlayer = gameState.players[gameState.deadBody.playerId];
+    const template = getDiscoveryNarrative(bodyPlayer?.name || 'someone');
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
+      () => {}, // back away — body stays, report button still available
+    );
+  }, [narrative, currentPlayer?.location, gameState?.deadBody?.playerId, currentPlayer?.status]);
+
+  // ── Helpers ───────────────────────────────────
 
   const playersHere = gameState && currentPlayer
     ? Object.values(gameState.players).filter(
@@ -176,7 +208,10 @@ export default function Game() {
     const template = getKillNarrative(victim?.name || 'them');
     startNarrative(
       template,
-      () => socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } })),
+      () => {
+        discoveredBodyRef.current = victimId; // Don't trigger discovery for own kill
+        socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
+      },
       () => {}, // choice B: back out, do nothing
     );
   };
@@ -533,10 +568,12 @@ export default function Game() {
 
       {currentPlayer.status === 'alive' ? (
         <>
-          {/* Dead body */}
-          {gameState.deadBody && (
+          {/* Dead body — only visible at the body's location */}
+          {gameState.deadBody && currentPlayer.location === gameState.deadBody.location && (
             <div className="mb-4">
-              <p className="text-[var(--red)] glow-red text-lg">!! A BODY HAS BEEN FOUND !!</p>
+              <p className="text-[var(--red)] glow-red text-lg">
+                {gameState.players[gameState.deadBody.playerId]?.name || 'Someone'} lies motionless on the ground.
+              </p>
               <button className="term-btn term-btn-red text-lg" onClick={handleReportBody}>
                 {'> '}Report body
               </button>

@@ -9,13 +9,14 @@ function pickRandom<T>(arr: T[]): T {
 }
 
 // ── TRAVEL ────────────────────────────────────────
+// All generic — no school-specific references (works for CVS, Boulevard, Terrace too)
 
 const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
   {
     lines: [
-      "The hallway stretches ahead.",
-      "Your footsteps echo off the tiles.",
-      "The lights flicker once. Twice.",
+      "The path ahead is quiet.",
+      "Your footsteps are the only sound.",
+      "Then they're not.",
     ],
     choiceA: { label: "Keep moving", result: "You press on. Nothing follows. Probably." },
     choiceB: { label: "Pause and listen", result: "Silence. The kind that listens back." },
@@ -24,14 +25,14 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
     lines: [
       "You round the corner.",
       "The air feels heavier here.",
-      "A locker door swings open on its own.",
+      "A door behind you swings shut on its own.",
     ],
-    choiceA: { label: "Ignore it", result: "You walk past. The locker clicks shut behind you." },
-    choiceB: { label: "Look inside", result: "Empty. But warm. Like someone was just here." },
+    choiceA: { label: "Ignore it", result: "You keep going. It clicks shut behind you." },
+    choiceB: { label: "Look back", result: "Nothing there. But warm. Like someone just left." },
   },
   {
     lines: [
-      "The corridor is darker than before.",
+      "It's darker than before.",
       "Did someone turn off the lights?",
       "You hear breathing. Not yours.",
     ],
@@ -49,30 +50,30 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
   },
   {
     lines: [
-      "You pass a bulletin board.",
-      "Something catches your eye—",
-      "A note: 'IT KNOWS.'",
+      "You pass a window.",
+      "Your reflection moves.",
+      "Half a second too late.",
     ],
-    choiceA: { label: "Take the note", result: "You reach for it. It crumbles to dust in your fingers." },
-    choiceB: { label: "Keep walking", result: "You look away. When you glance back, the note is gone." },
+    choiceA: { label: "Don't look again", result: "You keep your eyes forward. Smart." },
+    choiceB: { label: "Look closer", result: "Your reflection stares back. Then smiles. You didn't smile." },
   },
   {
     lines: [
-      "The floor tiles feel wrong underfoot.",
-      "Like the school is shifting.",
-      "Rearranging itself when you're not looking.",
+      "The ground feels wrong underfoot.",
+      "Like everything is shifting.",
+      "Rearranging when you're not looking.",
     ],
-    choiceA: { label: "Trust your sense of direction", result: "You press forward. The walls settle. For now." },
+    choiceA: { label: "Trust your sense of direction", result: "You press forward. Things settle. For now." },
     choiceB: { label: "Stop and get your bearings", result: "You pause. Everything looks normal. Almost." },
   },
   {
     lines: [
-      "A water fountain gurgles as you pass.",
-      "You didn't press the button.",
-      "It gurgles again. Louder.",
+      "A pipe groans inside the wall.",
+      "Then stops.",
+      "Then groans again. Rhythmic. Like breathing.",
     ],
-    choiceA: { label: "Don't look at it", result: "You keep your eyes forward. The gurgling stops." },
-    choiceB: { label: "Glance at the water", result: "The water is dark. Almost black. Then it clears." },
+    choiceA: { label: "It's just pipes", result: "Sure. Pipes that breathe. Totally normal." },
+    choiceB: { label: "Press your ear to the wall", result: "The groaning stops the moment you touch it." },
   },
   {
     lines: [
@@ -80,44 +81,44 @@ const TRAVEL_NARRATIVES: NarrativeTemplate[] = [
       "Matching your pace exactly.",
       "You stop. They stop.",
     ],
-    choiceA: { label: "Turn around", result: "Nothing. An empty hallway. The footsteps don't return." },
-    choiceB: { label: "Start walking again", result: "You walk. The footsteps follow. Then fade." },
+    choiceA: { label: "Turn around", result: "Nothing. Empty. The footsteps don't return." },
+    choiceB: { label: "Start walking again", result: "You walk. They follow. Then fade." },
   },
   {
     lines: [
-      "The PA system crackles to life.",
-      "Static. Then a voice, too quiet to understand.",
-      "It says your name. You think.",
+      "Your phone screen glitches.",
+      "For a second, it shows a message.",
+      "\"BEHIND YOU.\"",
     ],
-    choiceA: { label: "It's nothing. Move on.", result: "The PA cuts out. Just interference." },
-    choiceB: { label: "Listen closer", result: "\"...don't trust...\" Click. Dead air." },
-  },
-  {
-    lines: [
-      "A classroom door is ajar.",
-      "Inside, a chair is spinning.",
-      "Slowly. On its own.",
-    ],
-    choiceA: { label: "Close the door", result: "You pull it shut. The spinning stops. You hope." },
-    choiceB: { label: "Walk past quickly", result: "You hurry by. From inside: the creak of the chair stopping." },
+    choiceA: { label: "Don't turn around", result: "You keep walking. The screen returns to normal." },
+    choiceB: { label: "Turn around", result: "Nothing there. Your phone is fine. It's fine." },
   },
   {
     lines: [
       "Something crunches under your shoe.",
-      "Glass. From one of the ceiling lights.",
-      "You look up. The light is fine.",
+      "Glass. From somewhere above.",
+      "You look up. Everything's intact.",
     ],
-    choiceA: { label: "Keep going", result: "Crunch. Crunch. Then tile again." },
+    choiceA: { label: "Keep going", result: "Crunch. Crunch. Then solid ground again." },
     choiceB: { label: "Pick up a piece", result: "Cold to the touch. Colder than it should be." },
   },
   {
     lines: [
       "You smell something.",
-      "Pencil shavings. Chalk dust.",
-      "And something else. Something wrong.",
+      "Dust. Old paper.",
+      "And something metallic. Like blood.",
     ],
     choiceA: { label: "Breathe through your mouth", result: "The smell fades. Your mouth tastes like copper." },
     choiceB: { label: "Follow the smell", result: "It leads nowhere. And everywhere." },
+  },
+  {
+    lines: [
+      "A shadow slides across the wall.",
+      "Yours is behind you.",
+      "This one is ahead.",
+    ],
+    choiceA: { label: "Follow it", result: "It rounds the corner. Gone by the time you get there." },
+    choiceB: { label: "Let it go", result: "It stops. Waits. Then continues on." },
   },
 ];
 
@@ -158,19 +159,19 @@ const TASK_NARRATIVES: {
     choiceB: { label: "Wait for the lights", result: "They come back. You finish. Something feels different." },
   },
   {
-    lines: (title, desc) => [title + ".", desc, "As you work, you notice writing", "on the wall you've never seen before.", "'ALMOST OVER.'"],
+    lines: (title, desc) => [title + ".", desc, "As you work, you notice writing", "you've never seen before.", "'ALMOST OVER.'"],
     choiceA: { label: "Finish the task", result: "Done. When you look again, the writing is gone." },
     choiceB: { label: "Read more of the writing", result: "There's nothing else. Just those two words. Task complete." },
   },
   {
-    lines: (title, desc) => [title + ".", desc, "Your shadow on the wall", "moves before you do."],
+    lines: (title, desc) => [title + ".", desc, "Your shadow", "moves before you do."],
     choiceA: { label: "Don't think about it", result: "Done. Your shadow behaves itself now." },
     choiceB: { label: "Watch your shadow", result: "It's fine. It's fine. It's fine. Task complete." },
   },
   {
     lines: (title, desc) => [title + ".", desc, "Everything is normal.", "Completely normal.", "Too normal."],
     choiceA: { label: "Just do it", result: "Done. Nothing happened. That's what worries you." },
-    choiceB: { label: "Scan the room first", result: "Empty. Quiet. You finish. Why are you relieved?" },
+    choiceB: { label: "Scan the area first", result: "Empty. Quiet. You finish. Why are you relieved?" },
   },
   {
     lines: (title, desc) => [title + ".", desc, "Someone was here before you.", "You can tell.", "Things are slightly moved."],
@@ -196,7 +197,7 @@ const KILL_NARRATIVES: {
   choiceB: { label: string; result: string };
 }[] = [
   {
-    lines: (name) => [`${name} is here.`, "Back turned. Unaware.", "The hallway behind you is empty.", "No witnesses."],
+    lines: (name) => [`${name} is here.`, "Back turned. Unaware.", "No one else around.", "No witnesses."],
     choiceA: { label: "Now.", getResult: (n) => `It's over before ${n} knows what happened.` },
     choiceB: { label: "Not yet.", result: "You pull back into the shadows. Another time." },
   },
@@ -231,7 +232,46 @@ export function getKillNarrative(victimName: string): NarrativeTemplate {
   };
 }
 
-// ── BODY REPORT ───────────────────────────────────
+// ── BODY DISCOVERY ────────────────────────────────
+// Auto-triggers when you walk into a room with a body
+
+const DISCOVERY_NARRATIVES: {
+  lines: (name: string) => string[];
+  choiceA: { label: string; result: string };
+  choiceB: { label: string; result: string };
+}[] = [
+  {
+    lines: (name) => ["Wait.", "Something is wrong.", `${name} is on the ground.`, "Not moving."],
+    choiceA: { label: "Report it", result: "You call for help. Everyone needs to see this." },
+    choiceB: { label: "Back away", result: "You step back. You didn't see this. You didn't." },
+  },
+  {
+    lines: (name) => ["You freeze.", "There, on the floor—", `${name}.`, "Oh god."],
+    choiceA: { label: "Sound the alarm", result: "Your hands shake as you hit the button." },
+    choiceB: { label: "Keep walking", result: "Don't look. Don't think. Keep walking." },
+  },
+  {
+    lines: (name) => ["The air smells like iron.", "Then you see why.", `${name}. Still. Silent.`, "This is real."],
+    choiceA: { label: "Call everyone here", result: "Your voice echoes. Footsteps come running." },
+    choiceB: { label: "Slip away", result: "You were never here. Nobody saw you." },
+  },
+  {
+    lines: (name) => ["You almost trip.", "Over something. Someone.", `${name}.`, "Cold.", "How long have they been here?"],
+    choiceA: { label: "Report it now", result: "You shout. The word catches in your throat but comes out." },
+    choiceB: { label: "Pretend you didn't see", result: "You step around them. Keep moving. Someone else will find them." },
+  },
+];
+
+export function getDiscoveryNarrative(bodyName: string): NarrativeTemplate {
+  const t = pickRandom(DISCOVERY_NARRATIVES);
+  return {
+    lines: t.lines(bodyName),
+    choiceA: t.choiceA,
+    choiceB: t.choiceB,
+  };
+}
+
+// ── BODY REPORT (manual, after discovery) ─────────
 
 const REPORT_NARRATIVES: {
   lines: (name: string) => string[];
@@ -239,19 +279,14 @@ const REPORT_NARRATIVES: {
   choiceB: { label: string; result: string };
 }[] = [
   {
-    lines: (name) => ["You see something on the ground.", "No. Someone.", `It's ${name}.`, "They're not moving."],
+    lines: (name) => [`${name} is still here.`, "Still not moving.", "You have to say something.", "Don't you?"],
     choiceA: { label: "Sound the alarm", result: "You call everyone. This ends now." },
-    choiceB: { label: "Back away quietly", result: "You saw nothing. Nothing at all. You leave." },
+    choiceB: { label: "Not yet", result: "You turn away again. How long can you ignore this?" },
   },
   {
-    lines: (name) => ["You almost trip over—", "Oh no.", `${name}.`, "Still. Cold.", "This is real."],
+    lines: (name) => ["You look at the body again.", `${name}.`, "Someone did this.", "And they're still out there."],
     choiceA: { label: "Report it", result: "Your voice cracks as you call for help." },
-    choiceB: { label: "Pretend you didn't see", result: "You step around them. Keep walking. Don't think." },
-  },
-  {
-    lines: (name) => ["Something is wrong here.", "The air smells like iron.", `Then you see ${name}.`, "On the floor.", "Not breathing."],
-    choiceA: { label: "Tell everyone", result: "You shout. Footsteps come running." },
-    choiceB: { label: "Walk away", result: "You turn your back. Someone else will find them." },
+    choiceB: { label: "Walk away", result: "You leave. The guilt follows." },
   },
 ];
 
@@ -279,10 +314,10 @@ const MEETING_NARRATIVES: NarrativeTemplate[] = [
   {
     lines: [
       "Enough.",
-      "Something is wrong in this school.",
+      "Something is wrong here.",
       "Everyone needs to talk. Now.",
     ],
-    choiceA: { label: "Call the meeting", result: "The alarm echoes through every hallway." },
+    choiceA: { label: "Call the meeting", result: "The alarm echoes through every corridor." },
     choiceB: { label: "Wait a little longer", result: "You hesitate. Maybe you're imagining things." },
   },
   {
@@ -301,6 +336,7 @@ export function getMeetingNarrative(): NarrativeTemplate {
 }
 
 // ── IDLE FLAVOR ───────────────────────────────────
+// All generic — work indoors, outdoors, CVS, anywhere
 
 export const IDLE_FLAVOR = [
   "The lights flicker.",
@@ -308,25 +344,25 @@ export const IDLE_FLAVOR = [
   "You hear footsteps. Then nothing.",
   "The PA crackles. Static. Silence.",
   "Something moved in your peripheral vision.",
-  "The clock ticks. But not forward.",
-  "A cold draft. Every window is closed.",
+  "A clock ticks. But not forward.",
+  "A cold draft from nowhere.",
   "You smell something burning. Then it's gone.",
-  "The floor creaks above you. This is the top floor.",
+  "The ground vibrates. Once. Like a heartbeat.",
   "Your phone buzzes. No notification.",
-  "The ventilation hums a tune you almost recognize.",
-  "A pencil rolls off a desk on its own.",
+  "A hum. Low. Constant. Then gone.",
+  "Something small hits the ground nearby. You can't find it.",
   "The EXIT sign flickers. E-X-I-",
   "You feel eyes on you.",
   "A whisper. Too quiet to make out.",
-  "The water fountain turns on by itself.",
+  "A drain gurgles. Then silence.",
   "A shadow crosses the wall. Nothing cast it.",
-  "The hallway behind you looks longer than before.",
-  "A locker combination clicks. Open. Shut.",
+  "The path behind you looks longer than before.",
+  "Metal clicks somewhere. Open. Shut.",
   "The air pressure changes. Your ears pop.",
-  "Something scratches inside the wall.",
-  "The ceiling tiles shift. Settle. Shift again.",
-  "A child's laugh echoes. School ended hours ago.",
-  "The thermostat reads 33°F. You don't feel cold.",
+  "Something scratches behind the wall.",
+  "Something shifts above you.",
+  "A child's laugh echoes. From where?",
+  "The temperature drops. Just for a second.",
 ];
 
 export function getIdleFlavor(): string {
