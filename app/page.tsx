@@ -74,12 +74,12 @@ export default function Home() {
         <div>
           {/* Title */}
           <pre className="text-[var(--green)] glow text-sm sm:text-lg leading-tight mb-2">{`╔═════════════════════════╗
-║   S P E Y E R           ║
-║   I M P O S T O R       ║
+║                         ║
+║   S P E Y E R Z O R K   ║
 ║                         ║
 ║   v1.0  (c) 1986        ║
 ╚═════════════════════════╝`}</pre>
-          <p className="text-[var(--dim)] mb-8">A game of trust and deception.</p>
+          <p className="text-[var(--dim)] mb-8">You are in a school. It is dark. Trust no one.</p>
 
           {/* Name input */}
           <div className="mb-6">

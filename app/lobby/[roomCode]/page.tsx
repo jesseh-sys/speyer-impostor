@@ -87,7 +87,7 @@ export default function Lobby() {
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto">
       <div className="mt-8 mb-6">
-        <p className="text-[var(--dim)] text-sm">SPEYER-OS {'>'} GAME LOBBY</p>
+        <p className="text-[var(--dim)] text-sm">SPEYERZORK {'>'} GAME LOBBY</p>
         <div className="text-[var(--dim)] mt-2">{'═'.repeat(30)}</div>
       </div>
 
