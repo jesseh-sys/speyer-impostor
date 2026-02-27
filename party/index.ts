@@ -1,6 +1,6 @@
 import type * as Party from "partykit/server";
 import { GameState, Player, ClientMessage, PlayerRole, Task } from "../types/game";
-import { LOCATIONS, TASKS, PLAYER_COLORS, GAME_CONFIG, getImpostorCount } from "../lib/gameConfig";
+import { LOCATIONS, TASKS, PLAYER_ICONS, PLAYER_COLORS, GAME_CONFIG, getImpostorCount } from "../lib/gameConfig";
 
 export default class GameServer implements Party.Server {
   gameState: GameState | null = null;
@@ -74,10 +74,10 @@ export default class GameServer implements Party.Server {
   handleJoin(msg: ClientMessage, sender: Party.Connection) {
     if (!this.gameState) return;
 
-    const playerName = msg.data.playerName;
-    const playerId = msg.playerId; // Use the persistent player ID from the client
-    const icon = msg.data.icon || '😎';
-    const color = msg.data.color || PLAYER_COLORS[0];
+    const playerId = msg.playerId;
+    let playerName = msg.data.playerName;
+    let icon = msg.data.icon || '@';
+    let color = msg.data.color || PLAYER_COLORS[0];
 
     // If player already exists, just update their info (reconnection)
     if (this.gameState.players[playerId]) {
@@ -86,6 +86,29 @@ export default class GameServer implements Party.Server {
       this.gameState.players[playerId].icon = icon;
       this.gameState.players[playerId].color = color;
       return;
+    }
+
+    // Prevent duplicate names — append a number if taken
+    const otherPlayers = Object.values(this.gameState.players).filter(p => p.id !== playerId);
+    const takenNames = new Set(otherPlayers.map(p => p.name));
+    if (takenNames.has(playerName)) {
+      let suffix = 2;
+      while (takenNames.has(`${playerName}${suffix}`)) suffix++;
+      playerName = `${playerName}${suffix}`;
+    }
+
+    // Prevent duplicate icons — bump to next available
+    const takenIcons = new Set(otherPlayers.map(p => p.icon));
+    if (takenIcons.has(icon)) {
+      const available = PLAYER_ICONS.find(i => !takenIcons.has(i));
+      if (available) icon = available;
+    }
+
+    // Prevent duplicate colors — bump to next available
+    const takenColors = new Set(otherPlayers.map(p => p.color));
+    if (takenColors.has(color)) {
+      const available = PLAYER_COLORS.find(c => !takenColors.has(c));
+      if (available) color = available;
     }
 
     const player: Player = {
