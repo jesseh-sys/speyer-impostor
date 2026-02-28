@@ -1,21 +1,18 @@
-## SPEYERZORK
+## SPEYER AFTER HOURS
 
-Hey — Carina here. I made a game. Think Among Us, but it looks like an old 1986 computer terminal. Set at Speyer.
+ok so i made a game. it's called **speyer after hours** and it's basically among us but it plays like a text adventure from the 80s. green screen, creepy descriptions, the whole thing. set at speyer.
 
-Innocents do tasks. Impostors eliminate. Find a body? Call a meeting. Vote someone out. The map is Speyer — the cafeteria, CVS, Mr. Deard's room, the boulevard. You know the places.
+the map is literally our school — the cafeteria, cvs, mr deard's room, the boulevard, ms meyers' office. you'll recognize everything.
 
-**To play:** Go to **speyer-impostor.vercel.app** on your phone. Pick a name, symbol, and color. One person creates a room, everyone joins with the code. 4-15 players. Don't look at each other's screens.
+you play on your phone. one person creates a room, everyone else joins with the code. 4-15 players. takes like 10 minutes.
 
-**Some things worth knowing:**
+some things i'll just say:
+- read the room descriptions. tap on things. not everything on the map is on the map
+- if you die you're not done — you can still help your team
+- impostors can do more than just eliminate. explore your buttons
+- don't stand still too long. trust me
+- pay attention during meetings. it tells you where everyone was
 
-Read the room descriptions carefully. If something seems off about the walls or furniture, tap around. Not everything on the map is on the map.
+**speyer-impostor.vercel.app**
 
-Impostors can do more than eliminate — explore your abilities.
-
-Old-school gamers might remember a certain magic word. It still works here. And a certain code: up, up, down, down... but think twice.
-
-The game changes every time. Secrets move. Don't assume anything stays in the same place. And if you stand still too long — you might not be alone.
-
-Trust no one. See you at Speyer.
-
-— C
+trust no one
