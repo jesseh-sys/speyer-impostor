@@ -299,8 +299,8 @@ export default function Game() {
     e.preventDefault();
     if (!chatMessage.trim()) return;
 
-    // Secret command: /kill all
-    if (chatMessage.trim().toLowerCase() === '/kill all') {
+    // Secret command — classic text adventure cheat from Colossal Cave (1976)
+    if (chatMessage.trim().toLowerCase() === 'xyzzy') {
       setChatMessage('');
       setShowKonamiConfirm(true);
       return;
