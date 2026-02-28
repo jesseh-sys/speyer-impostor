@@ -102,23 +102,6 @@ export const TASKS: Omit<Task, 'id'>[] = [
   { title: 'Pick up litter', location: 'boulevard', description: 'Trash on the ground. None of it is yours. None of it should exist.', type: 'quick' },
 ];
 
-export const SABOTAGES = [
-  { id: 'fire-drill', name: 'Fire Drill!', description: 'Everyone must go to The Boulevard', duration: 30 },
-  { id: 'lunch-backup', name: 'Lunch Line Backup', description: 'Cafeteria is blocked', duration: 45 },
-  { id: 'internet-down', name: 'Internet Down', description: 'Can\'t complete digital tasks', duration: 40 },
-  { id: 'pa-announcement', name: 'PA Announcement', description: 'Loud static disrupts everyone', duration: 15 },
-  { id: 'lights-out', name: 'Lights Out', description: 'Reduced visibility', duration: 30 },
-  { id: 'locked-doors', name: 'Doors Locked', description: 'Can\'t move between rooms', duration: 25 },
-];
-
-export const KILL_ANIMATIONS = [
-  { id: 'viper', name: 'Viper', description: 'Poison attack' },
-  { id: 'phantom', name: 'Phantom', description: 'Disappear into shadows' },
-  { id: 'ninja', name: 'Ninja', description: 'Swift strike' },
-  { id: 'freeze', name: 'Freeze', description: 'Frozen in place' },
-  { id: 'zap', name: 'Zap', description: 'Electric shock' },
-];
-
 export const GAME_CONFIG = {
   MIN_PLAYERS: 4,
   MAX_PLAYERS: 15,
@@ -127,15 +110,10 @@ export const GAME_CONFIG = {
   GAME_DURATION: 600,
   TASKS_PER_PLAYER: 5,
   KILL_COOLDOWN: 30,
-  IMPOSTOR_RATIOS: {
-    5: 1,
-    8: 2,
-    12: 3,
-  },
 };
 
 export function getImpostorCount(playerCount: number): number {
-  if (playerCount < 8) return 1;
+  if (playerCount < 9) return 1;
   if (playerCount < 12) return 2;
   return 3;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
-import { GameState } from '@/types/game';
+import { GameState, Location } from '@/types/game';
 import {
   NarrativeTemplate,
   getTravelNarrative,
@@ -17,12 +17,45 @@ import {
   getPowerupDescription,
 } from '@/lib/narrative';
 
+// ── Mini-map layout ──────────────────────────────
+
+const MAP_ROWS: ({ id: string; abbr: string } | null)[][] = [
+  [{ id: 'lobby', abbr: 'LOB' }, { id: 'speyer', abbr: 'SPY' }, null],
+  [null, { id: 'suib', abbr: 'SUI' }, { id: 'meyers', abbr: 'MEY' }],
+  [{ id: 'boulevard', abbr: 'BLV' }, null, null],
+  [null, { id: 'cafeteria', abbr: 'CAF' }, { id: 'mj', abbr: 'MJ' }],
+  [{ id: 'cvs', abbr: 'CVS' }, { id: 'music', abbr: 'MUS' }, null],
+  [{ id: 'terrace', abbr: 'TER' }, null, { id: 'deard', abbr: 'DEA' }],
+];
+
+// ── BFS next step ────────────────────────────────
+
+function bfsNextStep(locations: Location[], fromId: string, toId: string): { hops: number; nextRoom: string } | null {
+  if (fromId === toId) return { hops: 0, nextRoom: fromId };
+  const queue: { id: string; path: string[] }[] = [{ id: fromId, path: [] }];
+  const visited = new Set([fromId]);
+  while (queue.length > 0) {
+    const { id, path } = queue.shift()!;
+    const loc = locations.find(l => l.id === id);
+    if (!loc) continue;
+    for (const neighbor of loc.connectedTo) {
+      if (visited.has(neighbor)) continue;
+      const newPath = [...path, neighbor];
+      if (neighbor === toId) return { hops: newPath.length, nextRoom: newPath[0] };
+      visited.add(neighbor);
+      queue.push({ id: neighbor, path: newPath });
+    }
+  }
+  return null;
+}
+
 // ── Narrative state ──────────────────────────────
 
 interface ActiveNarrative {
   lines: string[];
   choiceA: { label: string; result: string; action: () => void };
   choiceB: { label: string; result: string; action: () => void };
+  autoResolve?: boolean; // Skip choices, auto-show result of A then dismiss
 }
 
 export default function Game() {
@@ -40,6 +73,8 @@ export default function Game() {
   const [revealedLines, setRevealedLines] = useState(0);
   const [showChoices, setShowChoices] = useState(false);
   const [resultText, setResultText] = useState<string | null>(null);
+  const resultTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingNarrativeActionRef = useRef<(() => void) | null>(null);
 
   // Idle flavor
   const [flavorLines, setFlavorLines] = useState<string[]>([]);
@@ -47,13 +82,8 @@ export default function Game() {
   // Body discovery tracking
   const discoveredBodyRef = useRef<string | null>(null);
 
-  // Konami code (keyboard) + secret tap (mobile)
-  const [showKonamiConfirm, setShowKonamiConfirm] = useState(false);
-  const konamiRef = useRef<string[]>([]);
-  const tapCountRef = useRef({ count: 0, lastTap: 0 });
-
   // Grue tracking
-  const [grueWarning, setGrueWarning] = useState(0); // 0=none, 1=dark, 2=grue
+  const [grueWarning, setGrueWarning] = useState(0);
   const grueTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Secret room discovery
@@ -66,6 +96,20 @@ export default function Game() {
 
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
+
+  // Role reveal overlay
+  const [showRoleReveal, setShowRoleReveal] = useState(false);
+  const roleRevealShownRef = useRef(false);
+
+  // Mini-map toggle
+  const [showMap, setShowMap] = useState(false);
+
+  // Restart delay (prevent rage-restart before others read results)
+  const [restartReady, setRestartReady] = useState(false);
+
+  // Task completion banner
+  const [taskCompleteBanner, setTaskCompleteBanner] = useState(false);
+  const prevTaskCountRef = useRef<number | null>(null);
 
   const socketRef = useRef<ReturnType<typeof usePartySocket> | null>(null);
   const socket = usePartySocket({
@@ -89,7 +133,6 @@ export default function Game() {
   socketRef.current = socket;
 
   // Re-identify on every connection (including reconnects after WiFi drop)
-  // Done in a separate effect because socket isn't available inside its own onOpen
   useEffect(() => {
     const handleOpen = () => {
       const pid = sessionStorage.getItem('playerId');
@@ -98,7 +141,6 @@ export default function Game() {
       }
     };
     socket.addEventListener('open', handleOpen);
-    // If already connected, identify now
     if (socket.readyState === WebSocket.OPEN) {
       handleOpen();
     }
@@ -110,55 +152,8 @@ export default function Game() {
     if (persistentId) setPlayerId(persistentId);
   }, []);
 
-  // Identify ourselves to the server for per-player filtered state
-  useEffect(() => {
-    if (playerId) {
-      socket.send(JSON.stringify({ type: 'identify', playerId }));
-    }
-  }, [playerId]);
-
-  // ── Konami code detection ─────────────────────
-  // Keyboard: ↑↑↓↓←→←→BA  |  Mobile: tap ROLE header 10x fast
-
-  useEffect(() => {
-    const KONAMI = ['up','up','down','down','left','right','left','right','b','a'];
-    const seq = konamiRef.current;
-
-    const checkKonami = () => {
-      if (seq.length >= KONAMI.length) {
-        const last = seq.slice(-KONAMI.length);
-        if (last.every((v, i) => v === KONAMI[i])) {
-          seq.length = 0;
-          setShowKonamiConfirm(true);
-        }
-      }
-    };
-
-    const onKey = (e: KeyboardEvent) => {
-      const map: Record<string, string> = {
-        ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-        b: 'b', B: 'b', a: 'a', A: 'a',
-      };
-      if (map[e.key]) { seq.push(map[e.key]); checkKonami(); }
-      if (seq.length > 20) seq.splice(0, seq.length - 20);
-    };
-
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Mobile: tap the role header 10 times within 4 seconds
-  const handleRoleTap = useCallback(() => {
-    const now = Date.now();
-    const ref = tapCountRef.current;
-    if (now - ref.lastTap > 4000) ref.count = 0; // reset if too slow
-    ref.count++;
-    ref.lastTap = now;
-    if (ref.count >= 10) {
-      ref.count = 0;
-      setShowKonamiConfirm(true);
-    }
-  }, []);
+  // Note: identify is handled by the handleOpen listener above (fires on connect + reconnect).
+  // No separate effect needed — avoids double-send race.
 
   // ── Timer countdown ──────────────────────────
 
@@ -180,6 +175,20 @@ export default function Game() {
     }
   }, [gameState?.phase]);
 
+  // ── Auto-dismiss narrative on phase change ────
+  // If a meeting/vote/results/gameOver starts while player is in a narrative,
+  // dismiss it immediately so they can participate
+  useEffect(() => {
+    if (!narrative) return;
+    if (gameState?.phase && gameState.phase !== 'playing') {
+      if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+      pendingNarrativeActionRef.current = null;
+      setNarrative(null);
+      setResultText(null);
+      setShowChoices(false);
+    }
+  }, [gameState?.phase]);
+
   // ── Auto-scroll chat ─────────────────────────
 
   useEffect(() => {
@@ -190,9 +199,20 @@ export default function Game() {
 
   useEffect(() => {
     if (!narrative) return;
-    if (resultText) return; // don't reveal during result
+    if (resultText) return;
 
     if (revealedLines >= narrative.lines.length) {
+      if (narrative.autoResolve) {
+        // Auto-resolve: show result of A directly, skip choices
+        const t = setTimeout(() => {
+          setResultText(narrative.choiceA.result);
+          resultTimerRef.current = setTimeout(() => {
+            setNarrative(null);
+            setResultText(null);
+          }, 800);
+        }, 200);
+        return () => clearTimeout(t);
+      }
       const t = setTimeout(() => setShowChoices(true), 400);
       return () => clearTimeout(t);
     }
@@ -202,11 +222,13 @@ export default function Game() {
 
   // ── Idle flavor text ──────────────────────────
 
+  const playerLocationRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     if (gameState?.phase !== 'playing' || narrative) return;
     setFlavorLines([]);
     const interval = setInterval(() => {
-      setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor(currentPlayer?.location)]);
+      setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor(playerLocationRef.current)]);
     }, 12000 + Math.random() * 8000);
     return () => clearInterval(interval);
   }, [gameState?.phase, !!narrative]);
@@ -217,40 +239,45 @@ export default function Game() {
   }, [gameState?.players?.[playerId]?.location]);
 
   // ── Grue mechanic ──────────────────────────
-  // Stay in one room 60s+: warnings then forced teleport
+  // Uses gameState ref to read fresh location data at timeout-fire time
+
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
 
   useEffect(() => {
     if (gameState?.phase !== 'playing') return;
     const player = gameState?.players?.[playerId];
     if (!player || player.status === 'dead') return;
-    const loc = gameState?.locations.find(l => l.id === player.location);
 
-    // Reset grue on location change
     setGrueWarning(0);
     if (grueTimerRef.current) clearTimeout(grueTimerRef.current);
 
-    // 40s: first warning
     const t1 = setTimeout(() => {
       setGrueWarning(1);
       setFlavorLines(prev => [...prev.slice(-1), 'It is getting dark...']);
-    }, 40000);
+    }, 50000);
 
-    // 55s: second warning
     const t2 = setTimeout(() => {
       setGrueWarning(2);
       setFlavorLines(prev => [...prev.slice(-1), 'You are likely to be eaten by a grue.']);
-    }, 55000);
+    }, 75000);
 
-    // 65s: grue strikes — teleport to random connected room
     const t3 = setTimeout(() => {
+      // Read fresh state at fire time to avoid stale closure
+      const gs = gameStateRef.current;
+      const p = gs?.players?.[playerId];
+      if (!p || p.status !== 'alive') return;
+      // Don't grue-move during doors locked
+      if (gs?.doorsLocked && gs.doorsLocked.until > Date.now()) return;
+      const loc = gs?.locations.find(l => l.id === p.location);
       if (!loc?.connectedTo.length) return;
-      const randomExit = loc.connectedTo[
-        Math.floor(Math.random() * loc.connectedTo.length)
-      ];
+      const exits = loc.connectedTo.filter(id => id !== 'secret');
+      if (!exits.length) return;
+      const randomExit = exits[Math.floor(Math.random() * exits.length)];
       setGrueWarning(0);
       setFlavorLines(['A grue has found you! You flee in terror.']);
       socket.send(JSON.stringify({ type: 'move', playerId, data: { location: randomExit } }));
-    }, 65000);
+    }, 90000);
 
     grueTimerRef.current = t3;
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
@@ -264,26 +291,57 @@ export default function Game() {
     return () => clearInterval(interval);
   }, [gameState?.players?.[playerId]?.powerup?.until]);
 
-  // ── Derived values (needed by effects below) ──
+  // ── Derived values ────────────────────────────
   const currentPlayer = gameState ? gameState.players[playerId] : null;
   const currentLocation = gameState?.locations.find(l => l.id === currentPlayer?.location);
 
+  // Keep refs fresh for use in setTimeout closures
+  playerLocationRef.current = currentPlayer?.location;
+
+  // ── Restart delay on game over ─────────────────
+  useEffect(() => {
+    if (gameState?.phase === 'gameOver') {
+      setRestartReady(false);
+      const t = setTimeout(() => setRestartReady(true), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [gameState?.phase]);
+
+  // ── Role reveal overlay ────────────────────────
+  useEffect(() => {
+    if (gameState?.phase === 'playing' && gameState.timer && !roleRevealShownRef.current) {
+      const elapsed = Date.now() - gameState.timer.startTime;
+      if (elapsed < 10000) {
+        roleRevealShownRef.current = true;
+        setShowRoleReveal(true);
+        setTimeout(() => setShowRoleReveal(false), 4000);
+      }
+    }
+  }, [gameState?.phase, gameState?.timer?.startTime]);
+
+  // ── Task completion banner ─────────────────────
+  useEffect(() => {
+    const count = currentPlayer?.tasksCompleted ?? 0;
+    if (prevTaskCountRef.current !== null && count > prevTaskCountRef.current) {
+      setTaskCompleteBanner(true);
+      setTimeout(() => setTaskCompleteBanner(false), 2000);
+    }
+    prevTaskCountRef.current = count;
+  }, [currentPlayer?.tasksCompleted]);
+
   // ── Body discovery ──────────────────────────
 
-  // Clear discovery tracking when bodies are cleared (after meeting)
   useEffect(() => {
     if (!gameState?.deadBodies?.length) {
       discoveredBodyRef.current = null;
     }
   }, [gameState?.deadBodies?.length]);
 
-  // Auto-trigger discovery narrative when entering a room with a body
   useEffect(() => {
     if (narrative) return;
     if (!gameState?.deadBodies?.length || !currentPlayer) return;
     if (currentPlayer.status === 'dead') return;
 
-    // Find a body in our room that we haven't discovered yet
     const bodyHere = gameState.deadBodies.find(
       b => b.location === currentPlayer.location && b.playerId !== discoveredBodyRef.current
     );
@@ -295,7 +353,8 @@ export default function Game() {
     startNarrative(
       template,
       () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
-      () => {}, // back away — body stays, report button still available
+      () => {},
+      false,
     );
   }, [narrative, currentPlayer?.location, gameState?.deadBodies?.length, currentPlayer?.status]);
 
@@ -307,9 +366,9 @@ export default function Game() {
       )
     : [];
 
-  const myTasks = gameState && currentPlayer
-    ? gameState.tasks.filter(t =>
-        t.id.startsWith(playerId) && t.location === currentPlayer.location
+  const ghostsHere = gameState && currentPlayer && currentPlayer.status === 'dead'
+    ? Object.values(gameState.players).filter(
+        p => p.location === currentPlayer.location && p.status === 'dead' && p.id !== playerId
       )
     : [];
 
@@ -319,22 +378,32 @@ export default function Game() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  // Game clock: during playing phase use local countdown, otherwise use frozen server value
+  const gameClockSeconds = gameState?.phase === 'playing'
+    ? timeLeft
+    : (gameState?.gameTimeRemaining ?? 0);
+
   // ── Start a narrative ─────────────────────────
 
   const startNarrative = useCallback((
     template: NarrativeTemplate,
     onA: () => void,
     onB: () => void,
+    autoResolve?: boolean,
   ) => {
+    // Clear any pending result timer
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
     setNarrative({
       lines: template.lines,
       choiceA: { ...template.choiceA, action: onA },
       choiceB: { ...template.choiceB, action: onB },
+      autoResolve: autoResolve ?? false,
     });
     setRevealedLines(0);
     setShowChoices(false);
     setResultText(null);
     setFlavorLines([]);
+    pendingNarrativeActionRef.current = null;
   }, []);
 
   const handleNarrativeChoice = (choice: 'a' | 'b') => {
@@ -342,63 +411,86 @@ export default function Game() {
     const chosen = choice === 'a' ? narrative.choiceA : narrative.choiceB;
     setResultText(chosen.result);
     setShowChoices(false);
+    pendingNarrativeActionRef.current = chosen.action;
 
-    setTimeout(() => {
+    resultTimerRef.current = setTimeout(() => {
       chosen.action();
       setNarrative(null);
       setResultText(null);
-    }, 1800);
+      pendingNarrativeActionRef.current = null;
+    }, 1200);
   };
 
-  // ── Action handlers (with narrative) ──────────
+  // Tap narrative to skip through
+  const handleNarrativeSkip = useCallback(() => {
+    if (!narrative) return;
+    // If showing result text, skip the delay and finish
+    if (resultText) {
+      if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+      pendingNarrativeActionRef.current?.();
+      setNarrative(null);
+      setResultText(null);
+      pendingNarrativeActionRef.current = null;
+      return;
+    }
+    // If choices are showing, don't skip (let them pick)
+    if (showChoices) return;
+    // If lines still revealing, reveal all and proceed
+    if (revealedLines < narrative.lines.length) {
+      setRevealedLines(narrative.lines.length);
+    }
+  }, [narrative, resultText, showChoices, revealedLines]);
+
+  // ── Action handlers ───────────────────────────
 
   const handleMove = (locationId: string) => {
+    // Send move immediately
+    socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } }));
+    // Show narrative as flavor (autoResolve — both choices are no-ops)
     const dest = gameState?.locations.find(l => l.id === locationId);
     const template = getTravelNarrative(dest?.name || 'somewhere', locationId);
-    startNarrative(
-      template,
-      () => socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } })),
-      () => socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } })),
-    );
+    startNarrative(template, () => {}, () => {}, true);
+  };
+
+  const handleGhostMove = (locationId: string) => {
+    // Ghosts move instantly, no narrative
+    socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } }));
   };
 
   const handleKill = (victimId: string) => {
+    // Send kill immediately — target can't escape during narrative
+    discoveredBodyRef.current = victimId;
+    pendingKillRef.current = victimId;
+    socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
+    // Show kill narrative as flavor
     const victim = gameState?.players[victimId];
     const template = getKillNarrative(victim?.name || 'them');
-    startNarrative(
-      template,
-      () => {
-        discoveredBodyRef.current = victimId; // Don't trigger discovery for own kill
-        pendingKillRef.current = victimId; // Track to detect shield block
-        socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
-      },
-      () => {}, // choice B: back out, do nothing
-    );
+    startNarrative(template, () => {}, () => {}, true);
   };
 
   const handleCompleteTask = (taskId: string) => {
+    // Send task completion immediately
+    socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } }));
+    // Show narrative as flavor
     const task = gameState?.tasks.find(t => t.id === taskId);
     const template = getTaskNarrative(task?.title || 'Task', task?.description || '');
-    startNarrative(
-      template,
-      () => socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } })),
-      () => socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } })),
-    );
+    startNarrative(template, () => {}, () => {}, true);
   };
 
   const handleReportBody = () => {
+    // Keep functional — choice A reports, choice B walks away
     const bodyHere = gameState?.deadBodies?.find(b => b.location === currentPlayer?.location);
     const bodyPlayer = bodyHere ? gameState?.players[bodyHere.playerId] : null;
     const template = getReportNarrative(bodyPlayer?.name || 'someone');
     startNarrative(
       template,
       () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
-      () => {}, // choice B: walk away
+      () => {},
+      false,
     );
   };
 
-  // Secret room: tap the Music Room description to discover the hidden exit
-  // The trigger text changes each game based on the active method
+  // Secret room: tap description to discover (3 taps)
   const handleSecretTap = useCallback(() => {
     if (secretRoomFound) return;
     const now = Date.now();
@@ -406,7 +498,7 @@ export default function Game() {
     if (now - ref.lastTap > 3000) ref.count = 0;
     ref.count++;
     ref.lastTap = now;
-    if (ref.count >= 5) {
+    if (ref.count >= 3) {
       ref.count = 0;
       setSecretRoomFound(true);
     }
@@ -418,32 +510,25 @@ export default function Game() {
     startNarrative(
       template,
       () => socket.send(JSON.stringify({ type: 'enterSecretRoom', playerId })),
-      () => {}, // back away
+      () => {},
+      false,
     );
   };
 
   const handleCallMeeting = () => {
+    // Keep functional — choice A calls meeting, choice B backs out
     const template = getMeetingNarrative();
     startNarrative(
       template,
       () => socket.send(JSON.stringify({ type: 'callMeeting', playerId })),
-      () => {}, // choice B: not yet
+      () => {},
+      false,
     );
   };
 
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
-
-    // Secret command — classic text adventure cheat from Colossal Cave (1976)
-    if (chatMessage.trim().toLowerCase() === 'xyzzy') {
-      // Send the hollow voice message so everyone sees it
-      socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: "xyzzy" } }));
-      setChatMessage('');
-      // Small delay so they see the message before the confirm
-      setTimeout(() => setShowKonamiConfirm(true), 800);
-      return;
-    }
 
     socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: chatMessage } }));
     setChatMessage('');
@@ -478,40 +563,49 @@ export default function Game() {
     );
   }
 
-  // ── KONAMI CONFIRMATION ──────────────────────
+  // ── ROLE REVEAL OVERLAY ──────────────────────
 
-  const konamiOverlay = showKonamiConfirm && (
-    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-      <div className="max-w-sm w-full">
-        <p className="text-[var(--red)] glow-red text-xl text-center mb-2">
-          ⚠ WARNING ⚠
-        </p>
-        <div className="text-[var(--dim)] text-center mb-1">{'═'.repeat(28)}</div>
-        <p className="text-lg text-center mb-1">KONAMI CODE DETECTED.</p>
-        <p className="text-lg text-center mb-1">This will crash reality.</p>
-        <p className="text-lg text-center mb-4">Everyone dies. No survivors.</p>
-        <div className="text-[var(--dim)] text-center mb-4">{'═'.repeat(28)}</div>
-        <p className="text-[var(--amber)] glow-amber text-center mb-6">
-          ARE YOU SURE?
-        </p>
-        <div className="flex flex-col gap-2">
-          <button
-            onClick={() => {
-              socket.send(JSON.stringify({ type: 'konamiKill', playerId }));
-              setShowKonamiConfirm(false);
-            }}
-            className="term-btn term-btn-red text-xl"
-          >
-            {'> '}YES. CRASH REALITY.
-          </button>
-          <button
-            onClick={() => setShowKonamiConfirm(false)}
-            className="term-btn text-xl text-[var(--dim)]"
-          >
-            {'> '}No. I'm not ready.
-          </button>
-        </div>
+  const roleRevealOverlay = showRoleReveal && currentPlayer && (
+    <div className="fixed inset-0 z-40 bg-black flex items-center justify-center p-4">
+      <div className="max-w-sm w-full text-center">
+        {currentPlayer.role === 'impostor' ? (
+          <>
+            <pre className="text-[var(--red)] glow-red text-xs sm:text-sm leading-tight">{`
+  _____
+ /     \\
+| () () |
+ \\ ___ /
+  |||||`}</pre>
+            <p className="text-[var(--red)] glow-red text-3xl mt-4 tracking-widest">
+              IMPOSTOR
+            </p>
+            <p className="text-[var(--dim)] mt-3">Kill. Sabotage. Survive.</p>
+            <p className="text-[var(--dim)] mt-1">You are not alone.</p>
+          </>
+        ) : (
+          <>
+            <pre className="text-[var(--green)] glow text-xs sm:text-sm leading-tight">{`
+   ___
+  /   \\
+ | o o |
+  \\_^_/
+   |||`}</pre>
+            <p className="text-[var(--green)] glow text-3xl mt-4 tracking-widest">
+              INNOCENT
+            </p>
+            <p className="text-[var(--dim)] mt-3">Complete tasks. Report bodies.</p>
+            <p className="text-[var(--dim)] mt-1">Trust no one.</p>
+          </>
+        )}
       </div>
+    </div>
+  );
+
+  // ── TASK COMPLETE BANNER ─────────────────────
+
+  const taskBanner = taskCompleteBanner && (
+    <div className="fixed top-0 left-0 right-0 z-30 text-center py-3" style={{ background: 'rgba(0, 255, 65, 0.15)' }}>
+      <p className="text-[var(--green)] glow text-xl tracking-widest">TASK COMPLETE</p>
     </div>
   );
 
@@ -519,8 +613,14 @@ export default function Game() {
 
   if (narrative) {
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col justify-center">
-        {konamiOverlay}
+      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col justify-center" onClick={handleNarrativeSkip}>
+
+        {roleRevealOverlay}
+        {taskBanner}
+        {/* Game clock during narrative */}
+        {gameClockSeconds > 0 && (
+          <p className="text-[var(--amber)] text-sm text-right mb-4 opacity-60">[{formatTime(gameClockSeconds)}]</p>
+        )}
         <div>
           {narrative.lines.slice(0, revealedLines).map((line, i) => (
             <p key={i} className="text-xl mb-2 glow">{line}</p>
@@ -531,7 +631,7 @@ export default function Game() {
           )}
 
           {showChoices && !resultText && (
-            <div className="mt-6">
+            <div className="mt-6" onClick={e => e.stopPropagation()}>
               <button
                 onClick={() => handleNarrativeChoice('a')}
                 className="term-btn text-xl"
@@ -550,6 +650,11 @@ export default function Game() {
           {resultText && (
             <p className="text-lg text-[var(--dim)] mt-6 glow">{resultText}</p>
           )}
+
+          {/* Skip hint */}
+          {revealedLines < narrative.lines.length && (
+            <p className="text-[var(--dim)] text-xs mt-8 opacity-40 text-center">tap to skip</p>
+          )}
         </div>
       </div>
     );
@@ -561,29 +666,10 @@ export default function Game() {
     const allPlayers = Object.values(gameState.players);
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
-        {konamiOverlay}
+
         <div className="mt-8">
           {divider()}
-          {gameState.winner === 'konami' ? (
-            <div>
-              <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
- ██╗  ██╗ ██████╗ ███╗   ██╗ █████╗ ███╗   ███╗██╗
- ██║ ██╔╝██╔═══██╗████╗  ██║██╔══██╗████╗ ████║██║
- █████╔╝ ██║   ██║██╔██╗ ██║███████║██╔████╔██║██║
- ██╔═██╗ ██║   ██║██║╚██╗██║██╔══██║██║╚██╔╝██║██║
- ██║  ██╗╚██████╔╝██║ ╚████║██║  ██║██║ ╚═╝ ██║██║
- ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝`}</pre>
-              <p className="text-[var(--red)] glow-red text-xl text-center mt-4">
-                ↑ ↑ ↓ ↓ ← → ← → B A
-              </p>
-              <p className="text-[var(--amber)] glow-amber text-center mt-2">
-                REALITY.EXE HAS CRASHED
-              </p>
-              <p className="text-[var(--dim)] text-center mt-1">
-                Everyone is dead. Nobody wins. The school is empty now.
-              </p>
-            </div>
-          ) : gameState.winner === 'innocents' ? (
+          {gameState.winner === 'innocents' ? (
             <div>
               <pre className="text-[var(--green)] glow text-xs sm:text-sm text-center leading-tight">{`
  ██╗███╗   ██╗███╗   ██╗ ██████╗  ██████╗███████╗███╗   ██╗████████╗███████╗
@@ -625,19 +711,17 @@ export default function Game() {
           ))}
 
           <div className="mt-8 flex flex-col gap-2">
-            {playerId === gameState.hostId ? (
-              <button
-                onClick={() => {
-                  socket.send(JSON.stringify({ type: 'restartGame', playerId }));
-                  setSecretRoomFound(false);
-                }}
-                className="term-btn glow text-xl"
-              >
-                [PLAY AGAIN — SAME GROUP]
-              </button>
-            ) : (
-              <p className="text-[var(--dim)] text-lg">Waiting for host to restart...</p>
-            )}
+            <button
+              onClick={() => {
+                if (!restartReady) return;
+                socket.send(JSON.stringify({ type: 'restartGame', playerId }));
+                setSecretRoomFound(false);
+                roleRevealShownRef.current = false;
+              }}
+              className={`term-btn text-xl ${restartReady ? 'glow' : 'text-[var(--dim)]'}`}
+            >
+              {restartReady ? '[PLAY AGAIN — SAME GROUP]' : '[PLAY AGAIN — wait...]'}
+            </button>
             <button onClick={() => window.location.href = '/'} className="term-btn text-xl text-[var(--dim)]">
               [NEW ROOM]
             </button>
@@ -647,14 +731,27 @@ export default function Game() {
     );
   }
 
-  // ── RESULTS ───────────────────────────────────
+  // ── RESULTS (with vote breakdown) ──────────────
 
   if (gameState.phase === 'results') {
     const ejection = gameState.ejectionResult;
+
+    // Build vote breakdown from gameState.votes
+    const voteBreakdown: Record<string, string[]> = {};
+    for (const [voterId, targetId] of Object.entries(gameState.votes)) {
+      if (!voteBreakdown[targetId]) voteBreakdown[targetId] = [];
+      const voterName = gameState.players[voterId]?.name || '???';
+      voteBreakdown[targetId].push(voterName);
+    }
+
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
-        {konamiOverlay}
+
         <div className="mt-8">
+          {/* Game clock */}
+          {gameClockSeconds > 0 && (
+            <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+          )}
           {divider()}
           <pre className="text-[var(--green)] glow text-center text-xs sm:text-sm leading-tight">{`
  ╔═══════════════════════════╗
@@ -679,6 +776,23 @@ export default function Game() {
             </p>
           )}
 
+          {/* Vote breakdown */}
+          {Object.keys(voteBreakdown).length > 0 && (
+            <div className="mt-6">
+              <p className="text-[var(--dim)] text-sm mb-2">VOTE BREAKDOWN:</p>
+              {Object.entries(voteBreakdown).map(([targetId, voters]) => {
+                const targetName = targetId === 'skip' ? 'SKIP' : (gameState.players[targetId]?.name || '???');
+                const targetColor = targetId === 'skip' ? 'var(--amber)' : (gameState.players[targetId]?.color || 'var(--green)');
+                return (
+                  <p key={targetId} className="text-base mb-1">
+                    <span style={{ color: targetColor }}>{targetName}</span>
+                    <span className="text-[var(--dim)]"> ({voters.length}): {voters.join(', ')}</span>
+                  </p>
+                );
+              })}
+            </div>
+          )}
+
           <p className="text-[var(--dim)] text-center mt-8">Returning to game...</p>
           <span className="cursor-blink text-xl">&#9612;</span>
         </div>
@@ -686,16 +800,22 @@ export default function Game() {
     );
   }
 
-  // ── VOTING ────────────────────────────────────
+  // ── VOTING (with self-vote prevention + progress) ──
 
   if (gameState.phase === 'voting') {
     const alivePlayers = Object.values(gameState.players).filter(p => p.status === 'alive');
     const hasVoted = gameState.votes[playerId] !== undefined;
+    const votesCast = Object.keys(gameState.votes).length;
+    const totalVoters = alivePlayers.length;
 
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto">
-        {konamiOverlay}
+      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col">
+
         <div className="mt-8">
+          {/* Game clock */}
+          {gameClockSeconds > 0 && (
+            <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+          )}
           {divider()}
           <pre className="text-[var(--amber)] glow-amber text-xs sm:text-sm text-center leading-tight">{`
  ██╗   ██╗ ██████╗ ████████╗███████╗
@@ -705,28 +825,29 @@ export default function Game() {
   ╚████╔╝ ╚██████╔╝   ██║   ███████╗
    ╚═══╝   ╚═════╝    ╚═╝   ╚══════╝`}</pre>
           <p className="text-[var(--amber)] text-center glow-amber">[{formatTime(timeLeft)}]</p>
+          {/* Vote progress */}
+          <p className="text-[var(--dim)] text-center text-sm">Votes: {votesCast}/{totalVoters}</p>
           {divider()}
 
           {currentPlayer.status === 'dead' ? (
             <p className="text-[var(--dim)] mt-4">(You are dead. Observing.)</p>
           ) : hasVoted ? (
             <div className="mt-4">
-              <p className="text-[var(--dim)]">Vote cast. Waiting for others...</p>
-              <span className="cursor-blink text-xl">&#9612;</span>
+              <p className="text-[var(--dim)]">Vote cast. Waiting for others... ({votesCast}/{totalVoters})</p>
             </div>
           ) : (
             <div className="mt-4">
-              {alivePlayers.map(p => (
+              {/* Don't show self in vote targets */}
+              {alivePlayers.filter(p => p.id !== playerId).map(p => (
                 <button
                   key={p.id}
                   onClick={() => handleVote(p.id)}
-                  className={`term-btn text-lg ${p.id === playerId ? 'text-[var(--dim)]' : ''}`}
+                  className="term-btn text-lg"
                 >
                   {'> '}
-                  <span style={{ color: p.id === playerId ? undefined : p.color }}>
+                  <span style={{ color: p.color }}>
                     {p.name} ({p.icon})
                   </span>
-                  {p.id === playerId && <span> (you)</span>}
                 </button>
               ))}
               <button
@@ -738,17 +859,64 @@ export default function Game() {
             </div>
           )}
         </div>
+
+        {/* Chat during voting */}
+        <div className="flex-1 overflow-y-auto my-4 min-h-[100px] max-h-[30vh]">
+          {gameState.chat.map(msg => {
+            const sender = gameState.players[msg.playerId];
+            return (
+              <p key={msg.id} className="text-base mb-1">
+                <span style={{ color: sender?.color || 'var(--green)' }}>
+                  {msg.playerName}:
+                </span>
+                {' '}{msg.message}
+              </p>
+            );
+          })}
+          <div ref={chatEndRef} />
+        </div>
+
+        {currentPlayer.status === 'alive' && (
+          <div className="pb-4">
+            <div className="flex flex-wrap gap-1 mb-2">
+              {['Who?', 'Self-report?', 'Skip vote', 'They\'re sus'].map(phrase => (
+                <button
+                  key={phrase}
+                  className="text-xs px-2 py-1 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
+                  onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
+                >
+                  {phrase}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={handleSendChat} className="flex gap-2">
+              <span className="text-[var(--dim)] text-xl mt-1">{'>'}</span>
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                className="term-input flex-1"
+                placeholder="speak..."
+                maxLength={200}
+              />
+            </form>
+          </div>
+        )}
       </div>
     );
   }
 
-  // ── MEETING ───────────────────────────────────
+  // ── MEETING (with game clock) ──────────────────
 
   if (gameState.phase === 'meeting') {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col">
-        {konamiOverlay}
+
         <div className="mt-8">
+          {/* Game clock */}
+          {gameClockSeconds > 0 && (
+            <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+          )}
           {divider()}
           {gameState.deadBodies?.some(b => b.reportedBy) ? (
             <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
@@ -769,7 +937,31 @@ export default function Game() {
  ╚═╝     ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝`}</pre>
           )}
           <p className="text-[var(--amber)] text-center">[{formatTime(timeLeft)}]</p>
+
+          {/* Body report info */}
+          {gameState.reportedBody && (
+            <p className="text-[var(--red)] text-center text-sm mt-1">
+              {gameState.reportedBody.reportedBy} found {gameState.reportedBody.name} dead at {gameState.reportedBody.location}
+            </p>
+          )}
           {divider()}
+
+          {/* Player locations at meeting start */}
+          {gameState.meetingLocations && Object.keys(gameState.meetingLocations).length > 0 && (
+            <div className="mb-3">
+              <p className="text-[var(--dim)] text-sm mb-1">LOCATIONS WHEN CALLED:</p>
+              {Object.entries(gameState.meetingLocations).map(([pid, locName]) => {
+                const p = gameState.players[pid];
+                if (!p) return null;
+                return (
+                  <p key={pid} className="text-sm ml-2">
+                    <span style={{ color: p.color }}>{p.name}</span>
+                    <span className="text-[var(--dim)]"> — {locName}</span>
+                  </p>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto my-4 min-h-[200px] max-h-[50vh]">
@@ -791,18 +983,32 @@ export default function Game() {
         </div>
 
         {currentPlayer.status === 'alive' ? (
-          <form onSubmit={handleSendChat} className="flex gap-2 pb-4">
-            <span className="text-[var(--dim)] text-xl mt-1">{'>'}</span>
-            <input
-              type="text"
-              value={chatMessage}
-              onChange={(e) => setChatMessage(e.target.value)}
-              className="term-input flex-1"
-              placeholder="speak..."
-              maxLength={200}
-              autoFocus
-            />
-          </form>
+          <div className="pb-4">
+            {/* Quick-chat buttons */}
+            <div className="flex flex-wrap gap-1 mb-2">
+              {['I saw a body', 'I was doing tasks', 'They\'re sus', 'Who?', 'Self-report?', 'Where was everyone?', 'I was with them', 'I\'m innocent'].map(phrase => (
+                <button
+                  key={phrase}
+                  className="text-xs px-2 py-1 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
+                  onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
+                >
+                  {phrase}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={handleSendChat} className="flex gap-2">
+              <span className="text-[var(--dim)] text-xl mt-1">{'>'}</span>
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                className="term-input flex-1"
+                placeholder="speak..."
+                maxLength={200}
+                autoFocus
+              />
+            </form>
+          </div>
         ) : (
           <p className="text-[var(--dim)] pb-4">(You are dead. You can only listen.)</p>
         )}
@@ -814,48 +1020,67 @@ export default function Game() {
 
   const othersHere = playersHere.filter(p => p.id !== playerId);
   const isLightsOut = gameState.lightsOut ? Date.now() < gameState.lightsOut.until : false;
-
-  // Shadow Walk is handled server-side — shadow-walking impostors have
-  // their location set to '__shadow__' so they naturally don't appear in othersHere
   const visibleOthers = othersHere;
+  const isImpostor = currentPlayer.role === 'impostor';
 
-  const killTargets = currentPlayer.role === 'impostor'
+  const killTargets = isImpostor
     ? othersHere.filter(p => p.role !== 'impostor')
     : [];
 
-  // Sixth Sense: computed server-side, sent as gameState.sixthSenseWarning
   const impostorNearby = !!gameState.sixthSenseWarning;
 
-  // Radar (innocent) or Tracker (impostor): see all player locations
   const hasLocationPower = currentPlayer.powerup &&
     (currentPlayer.powerup.type === 'radar' || currentPlayer.powerup.type === 'tracker') &&
     currentPlayer.powerup.until > Date.now();
 
-  // Bloodhound: computed server-side, sent as gameState.bloodhoundTarget
   const bloodhoundTarget = gameState.bloodhoundTarget || null;
-
-  // Doors locked
   const isDoorsLocked = gameState.doorsLocked ? Date.now() < gameState.doorsLocked.until : false;
+
+  // Cooldown computations
+  const now = Date.now();
+  const killCooldownLeft = gameState.cooldowns?.kill ? Math.max(0, Math.ceil((gameState.cooldowns.kill - now) / 1000)) : 0;
+  const sabotageCooldownLeft = gameState.cooldowns?.sabotage ? Math.max(0, Math.ceil((gameState.cooldowns.sabotage - now) / 1000)) : 0;
+  const meetingCooldownLeft = gameState.cooldowns?.meeting ? Math.max(0, Math.ceil((gameState.cooldowns.meeting - now) / 1000)) : 0;
+
+  // Tasks in current room
+  const myTasksHere = gameState.tasks.filter(t =>
+    t.id.startsWith(playerId) && t.location === currentPlayer.location
+  );
+
+  // All tasks (for persistent task list)
+  const allMyTasks = gameState.tasks.filter(t => t.id.startsWith(playerId));
 
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto pb-16">
-      {konamiOverlay}
+      {roleRevealOverlay}
+      {taskBanner}
+
       {/* Header */}
       <div className="mt-4">
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
-        {currentPlayer.role === 'impostor' ? (
-          <div onClick={handleRoleTap}>
-            <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`  _____
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            {isImpostor ? (
+              <div>
+                <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`  _____
  /     \\
 | () () |  ROLE: IMPOSTOR
  \\ ___ /
   |||||`}</pre>
+              </div>
+            ) : (
+              <p className="text-xl">
+                {' '}ROLE: INNOCENT {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
+              </p>
+            )}
           </div>
-        ) : (
-          <p className="text-xl" onClick={handleRoleTap}>
-            {' '}ROLE: INNOCENT {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
-          </p>
-        )}
+          {/* Game clock — always visible */}
+          {gameClockSeconds > 0 && (
+            <p className="text-[var(--amber)] glow-amber text-lg ml-2 whitespace-nowrap">
+              [{formatTime(gameClockSeconds)}]
+            </p>
+          )}
+        </div>
         {currentPlayer.status === 'dead' && (
           <div>
             <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`
@@ -865,7 +1090,7 @@ export default function Game() {
   ██║  ██║██╔══╝  ██╔══██║██║  ██║
   ██████╔╝███████╗██║  ██║██████╔╝
   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝`}</pre>
-            <p className="text-[var(--dim)] text-sm"> INSERT COIN TO CONTINUE.</p>
+            <p className="text-[var(--dim)] text-sm"> GHOST MODE — You drift unseen.</p>
           </div>
         )}
         {/* Global task progress bar */}
@@ -895,15 +1120,77 @@ export default function Game() {
         >
           {currentLocation?.description}
         </p>
-        {/* Subtle hint for the secret room — only in the entrance room */}
-        {gameState.atSecretEntrance && !secretRoomFound && gameState.secretRoomMethod && (
-          <p className="text-[var(--dim)] text-sm mt-1 opacity-60">
-            {gameState.secretRoomMethod === 'piano' && 'Something in the corner catches your eye...'}
-            {gameState.secretRoomMethod === 'shelves' && 'A faint hum comes from behind the shelves...'}
-            {gameState.secretRoomMethod === 'cases' && 'Something rattles in the back of the room...'}
-          </p>
-        )}
+        {/* Secret room hint — gets more visible after 2 minutes */}
+        {gameState.atSecretEntrance && !secretRoomFound && gameState.secretRoomMethod && (() => {
+          const gameElapsed = gameState.timer ? (Date.now() - gameState.timer.startTime) / 1000 : 0;
+          const isUrgent = gameElapsed > 120;
+          return (
+            <p className={`text-[var(--cyan)] mt-1 ${isUrgent ? 'text-base glow' : 'text-sm opacity-80'}`}>
+              {gameState.secretRoomMethod === 'piano' && (isUrgent
+                ? 'A hidden panel glows near the piano. TAP THE DESCRIPTION ABOVE.'
+                : 'Something in the corner catches your eye... (tap the description)')}
+              {gameState.secretRoomMethod === 'shelves' && (isUrgent
+                ? 'The shelves are vibrating. Something is behind them. TAP THE DESCRIPTION ABOVE.'
+                : 'A faint hum comes from behind the shelves... (tap the description)')}
+              {gameState.secretRoomMethod === 'cases' && (isUrgent
+                ? 'A case in the back is rattling violently. TAP THE DESCRIPTION ABOVE.'
+                : 'Something rattles in the back of the room... (tap the description)')}
+            </p>
+          );
+        })()}
       </div>
+
+      {/* Mini-map toggle */}
+      <button onClick={() => setShowMap(!showMap)} className="text-[var(--dim)] text-sm mb-2 bg-transparent border-none cursor-pointer">
+        [{showMap ? '-' : '+'}] MAP
+      </button>
+      {showMap && (
+        <div className="mb-4 font-mono text-sm leading-relaxed">
+          {MAP_ROWS.map((row, ri) => (
+            <div key={ri} className="flex">
+              {row.map((cell, ci) => {
+                if (!cell) return <span key={ci} className="w-20 inline-block">&nbsp;</span>;
+                const isCurrent = cell.id === currentPlayer.location;
+                const hasTask = allMyTasks.some(t => t.location === cell.id);
+                return (
+                  <span
+                    key={ci}
+                    className={`w-20 inline-block ${isCurrent ? 'text-[var(--green)] glow' : hasTask ? 'text-[var(--amber)]' : 'text-[var(--dim)]'}`}
+                  >
+                    {isCurrent ? `[${cell.abbr}]` : ` ${cell.abbr} `}
+                    {hasTask && !isCurrent && '*'}
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+          <p className="text-[var(--dim)] text-xs mt-1">[ ] = you {'  '} * = task</p>
+        </div>
+      )}
+
+      {/* Persistent task list */}
+      {currentPlayer.role === 'innocent' && allMyTasks.length > 0 && (
+        <div className="mb-4">
+          <p className="text-[var(--dim)] text-sm mb-1">YOUR TASKS:</p>
+          {allMyTasks.map(task => {
+            const loc = gameState.locations.find(l => l.id === task.location);
+            const isHere = task.location === currentPlayer.location;
+            const nav = !isHere && currentPlayer.location
+              ? bfsNextStep(gameState.locations, currentPlayer.location, task.location)
+              : null;
+            const nextLoc = nav ? gameState.locations.find(l => l.id === nav.nextRoom) : null;
+            return (
+              <p key={task.id} className={`text-sm ml-2 ${isHere ? 'text-[var(--green)]' : 'text-[var(--dim)]'}`}>
+                {isHere ? '>' : ' '} {task.title} — {loc?.name || '???'}
+                {isHere && ' [HERE]'}
+                {!isHere && nav && (
+                  <span className="text-[var(--amber)]"> ({nav.hops}{nav.hops === 1 ? ' room' : ' rooms'}, go: {nextLoc?.name || '???'})</span>
+                )}
+              </p>
+            );
+          })}
+        </div>
+      )}
 
       {/* Active powerup */}
       {currentPlayer.powerup && currentPlayer.powerup.until > Date.now() && (
@@ -948,15 +1235,19 @@ export default function Game() {
         {visibleOthers.length > 0 ? (
           <p className="text-lg">
             <span className="text-[var(--dim)]">You see: </span>
-            {isLightsOut && currentPlayer.role !== 'impostor' ? (
+            {isLightsOut && !isImpostor ? (
               <span className="text-[var(--dim)]">
-                {visibleOthers.map((_, i) => (i > 0 ? ', ' : '') + '???').join('')}
+                Shadows move around you...
               </span>
             ) : (
               visibleOthers.map((p, i) => (
                 <span key={p.id}>
                   {i > 0 && ', '}
                   <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
+                  {/* Co-impostor ALLY tag */}
+                  {isImpostor && p.role === 'impostor' && (
+                    <span className="text-[var(--red)]"> [ALLY]</span>
+                  )}
                 </span>
               ))
             )}
@@ -964,6 +1255,17 @@ export default function Game() {
         ) : (
           <p className="text-[var(--dim)] text-lg">
             {isLightsOut ? "You can't tell if you're alone." : "You are alone here."}
+          </p>
+        )}
+        {/* Ghosts visible to other ghosts */}
+        {currentPlayer.status === 'dead' && ghostsHere.length > 0 && (
+          <p className="text-[var(--dim)] text-base mt-1">
+            Ghosts: {ghostsHere.map((p, i) => (
+              <span key={p.id}>
+                {i > 0 && ', '}
+                <span style={{ color: p.color, opacity: 0.5 }}>{p.name}</span>
+              </span>
+            ))}
           </p>
         )}
       </div>
@@ -998,11 +1300,11 @@ export default function Game() {
 
       {currentPlayer.status === 'alive' ? (
         <>
-          {/* Dead bodies — only visible at the body's location */}
+          {/* Dead bodies */}
           {gameState.deadBodies?.filter(b => b.location === currentPlayer.location).map(body => (
             <div key={body.playerId} className="mb-4">
               <p className="text-[var(--red)] glow-red text-lg">
-                {isLightsOut && currentPlayer.role !== 'impostor'
+                {isLightsOut && !isImpostor
                   ? 'You trip over something. A body.'
                   : `${gameState.players[body.playerId]?.name || 'Someone'} lies motionless on the ground.`}
               </p>
@@ -1014,53 +1316,65 @@ export default function Game() {
             </div>
           ))}
 
-          {/* Kill targets (impostor) */}
-          {killTargets.length > 0 && (
+          {/* Kill targets (impostor) with cooldown */}
+          {isImpostor && (
             <div className="mb-4">
-              <p className="text-[var(--red)] text-lg">TARGETS:</p>
-              {killTargets.map(p => (
-                <button
-                  key={p.id}
-                  className="term-btn term-btn-red text-lg"
-                  onClick={() => handleKill(p.id)}
-                >
-                  {'> '}
-                  <span style={{ color: p.color }}>{p.name}</span>
-                </button>
-              ))}
+              {killCooldownLeft > 0 ? (
+                <p className="text-[var(--dim)] text-lg">KILL [{killCooldownLeft}s]</p>
+              ) : killTargets.length > 0 ? (
+                <>
+                  <p className="text-[var(--red)] text-lg">TARGETS:</p>
+                  {killTargets.map(p => (
+                    <button
+                      key={p.id}
+                      className="term-btn term-btn-red text-lg"
+                      onClick={() => handleKill(p.id)}
+                    >
+                      {'> '}
+                      <span style={{ color: p.color }}>{p.name}</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
             </div>
           )}
 
-          {/* Sabotage (impostor) */}
-          {currentPlayer.role === 'impostor' && !isLightsOut && !isDoorsLocked && (
+          {/* Sabotage (impostor) with cooldown */}
+          {isImpostor && (
             <div className="mb-4">
-              <p className="text-[var(--red)] text-lg">SABOTAGE:</p>
-              <button
-                className="term-btn term-btn-amber text-lg"
-                onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'lightsOut' } }))}
-              >
-                {'> '}Kill the lights
-              </button>
-              <button
-                className="term-btn term-btn-amber text-lg"
-                onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked' } }))}
-              >
-                {'> '}Lock the doors
-              </button>
-              <button
-                className="term-btn term-btn-amber text-lg"
-                onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }))}
-              >
-                {'> '}Scramble everyone
-              </button>
+              {sabotageCooldownLeft > 0 ? (
+                <p className="text-[var(--dim)] text-lg">SABOTAGE [{sabotageCooldownLeft}s]</p>
+              ) : !isLightsOut && !isDoorsLocked ? (
+                <>
+                  <p className="text-[var(--red)] text-lg">SABOTAGE:</p>
+                  <button
+                    className="term-btn term-btn-amber text-lg"
+                    onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'lightsOut' } }))}
+                  >
+                    {'> '}Kill the lights (30s)
+                  </button>
+                  <button
+                    className="term-btn term-btn-amber text-lg"
+                    onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked' } }))}
+                  >
+                    {'> '}Lock the doors (25s)
+                  </button>
+                  <button
+                    className="term-btn term-btn-amber text-lg"
+                    onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }))}
+                  >
+                    {'> '}Scramble everyone
+                  </button>
+                </>
+              ) : null}
             </div>
           )}
 
-          {/* Tasks (innocent) */}
-          {currentPlayer.role === 'innocent' && myTasks.length > 0 && (
+          {/* Tasks here (innocent) */}
+          {currentPlayer.role === 'innocent' && myTasksHere.length > 0 && (
             <div className="mb-4">
               <p className="text-lg">TASKS HERE:</p>
-              {myTasks.map(task => (
+              {myTasksHere.map(task => (
                 <button
                   key={task.id}
                   className="term-btn text-lg"
@@ -1076,20 +1390,21 @@ export default function Game() {
           <div className="mb-4">
             <p className="text-lg">EXITS:</p>
             {currentLocation?.connectedTo
-              .filter(locId => locId !== 'secret') // Hide secret room from normal exits
+              .filter(locId => locId !== 'secret')
               .map(locId => {
                 const loc = gameState.locations.find(l => l.id === locId);
                 return (
                   <button
                     key={locId}
-                    className="term-btn text-lg"
-                    onClick={() => handleMove(locId)}
+                    className={`term-btn text-lg ${isDoorsLocked ? 'text-[var(--dim)]' : ''}`}
+                    onClick={() => !isDoorsLocked && handleMove(locId)}
+                    disabled={isDoorsLocked}
                   >
-                    {'> '}{loc?.name}
+                    {'> '}{loc?.name}{isDoorsLocked ? ' [LOCKED]' : ''}
                   </button>
                 );
               })}
-            {/* Secret room exit — only in the entrance room after discovery */}
+            {/* Secret room exit */}
             {secretRoomFound && gameState.atSecretEntrance && (
               <button
                 className="term-btn text-lg text-[var(--cyan)]"
@@ -1100,18 +1415,62 @@ export default function Game() {
             )}
           </div>
 
-          {/* Actions */}
+          {/* Emergency meeting with cooldown (1 per game) */}
           <div className="mb-4">
-            <button
-              className="term-btn term-btn-amber text-lg"
-              onClick={handleCallMeeting}
-            >
-              {'> '}Call emergency meeting
-            </button>
+            {gameState.cooldowns?.meetingUsed ? (
+              <p className="text-[var(--dim)] text-lg">MEETING [used]</p>
+            ) : meetingCooldownLeft > 0 ? (
+              <p className="text-[var(--dim)] text-lg">MEETING [{meetingCooldownLeft}s]</p>
+            ) : (
+              <button
+                className="term-btn term-btn-amber text-lg"
+                onClick={handleCallMeeting}
+              >
+                {'> '}Call emergency meeting
+              </button>
+            )}
           </div>
         </>
       ) : (
-        <p className="text-[var(--dim)] mt-6 text-lg">(You are dead. You can only observe.)</p>
+        /* ── GHOST MODE (dead player) ─────────── */
+        <div className="mt-4">
+          <p className="text-[var(--dim)] text-lg mb-4">You drift through the halls, unseen by the living.</p>
+
+          {/* Ghost tasks — can still complete tasks to help team */}
+          {currentPlayer.role === 'innocent' && myTasksHere.length > 0 && (
+            <div className="mb-4">
+              <p className="text-[var(--dim)] text-lg">GHOST TASKS HERE:</p>
+              {myTasksHere.map(task => (
+                <button
+                  key={task.id}
+                  className="term-btn text-lg text-[var(--dim)]"
+                  onClick={() => handleCompleteTask(task.id)}
+                >
+                  {'> '}{task.title}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Ghost exits — instant movement, no narrative */}
+          <div className="mb-4">
+            <p className="text-[var(--dim)] text-lg">DRIFT TO:</p>
+            {currentLocation?.connectedTo
+              .filter(locId => locId !== 'secret')
+              .map(locId => {
+                const loc = gameState.locations.find(l => l.id === locId);
+                return (
+                  <button
+                    key={locId}
+                    className="term-btn text-lg text-[var(--dim)]"
+                    onClick={() => handleGhostMove(locId)}
+                  >
+                    {'> '}{loc?.name}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
       )}
 
       {/* Idle flavor text */}

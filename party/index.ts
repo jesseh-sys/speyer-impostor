@@ -17,6 +17,10 @@ export default class GameServer implements Party.Server {
   private disconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private lastEjection?: { playerId: string; role: PlayerRole };
   private gameTimeRemaining: number = 0; // ms remaining on game clock (paused during meetings)
+  private ephemeralTimers: ReturnType<typeof setTimeout>[] = []; // sabotage/powerup timers (cleared on restart)
+  private meetingsCalled: Set<string> = new Set(); // players who used their 1 emergency meeting
+  private meetingLocations: Record<string, string> = {}; // snapshot of player locations at meeting start
+  private reportedBody?: { name: string; location: string; reportedBy: string };
 
   constructor(readonly room: Party.Room) {}
 
@@ -45,7 +49,13 @@ export default class GameServer implements Party.Server {
   }
 
   onMessage(message: string, sender: Party.Connection) {
-    const msg: ClientMessage = JSON.parse(message);
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(message);
+    } catch {
+      console.error('Bad message from', sender.id, ':', message.slice(0, 100));
+      return;
+    }
 
     if (!this.gameState) return;
 
@@ -77,6 +87,10 @@ export default class GameServer implements Party.Server {
       msg.playerId = authenticatedPlayerId!;
     }
 
+    // Validate msg.data exists for handlers that need it
+    const needsData = ['join', 'move', 'completeTask', 'kill', 'chat', 'vote', 'sabotage'];
+    if (needsData.includes(msg.type) && !msg.data) return;
+
     switch (msg.type) {
       case 'join':
         this.handleJoin(msg, sender);
@@ -107,9 +121,6 @@ export default class GameServer implements Party.Server {
       case 'vote':
         this.handleVote(msg);
         break;
-      case 'konamiKill':
-        this.handleKonamiKill();
-        break;
       case 'sabotage':
         this.handleSabotage(msg);
         break;
@@ -117,9 +128,7 @@ export default class GameServer implements Party.Server {
         this.handleEnterSecretRoom(msg);
         break;
       case 'restartGame':
-        if (msg.playerId === this.hostId) {
-          this.handleRestartGame();
-        }
+        this.handleRestartGame();
         break;
     }
 
@@ -300,7 +309,17 @@ export default class GameServer implements Party.Server {
 
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
-    if (!player || player.status !== 'alive') return;
+    if (!player) return;
+
+    // Dead players move as ghosts (no door lock restriction)
+    if (player.status === 'dead') {
+      const currentLoc = this.gameState.locations.find(l => l.id === player.location);
+      if (!currentLoc || !currentLoc.connectedTo.includes(data.location)) return;
+      player.location = data.location;
+      return;
+    }
+
+    if (player.status !== 'alive') return;
 
     // Locked doors: no movement allowed
     if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) return;
@@ -317,7 +336,7 @@ export default class GameServer implements Party.Server {
 
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
-    if (!player || player.role !== 'innocent' || player.status !== 'alive') return;
+    if (!player || player.role !== 'innocent') return;
 
     // Validate the task exists, belongs to this player, and they're at the right location
     const task = this.gameState.tasks.find(t => t.id === data.taskId);
@@ -381,6 +400,13 @@ export default class GameServer implements Party.Server {
     if (!body) return;
 
     body.reportedBy = msg.playerId;
+    const bodyPlayer = this.gameState.players[body.playerId];
+    const bodyLoc = this.gameState.locations.find(l => l.id === body.location);
+    this.reportedBody = {
+      name: bodyPlayer?.name || '???',
+      location: bodyLoc?.name || '???',
+      reportedBy: reporter.name,
+    };
     this.startMeeting();
   }
 
@@ -390,10 +416,15 @@ export default class GameServer implements Party.Server {
     const player = this.gameState.players[msg.playerId];
     if (!player || player.status !== 'alive') return;
 
+    // Each player gets 1 emergency meeting per game
+    if (this.meetingsCalled.has(msg.playerId)) return;
+
     // Meeting cooldown — 30s between meetings
     const now = Date.now();
     if (now - this.lastMeetingTime < 30000) return;
 
+    this.meetingsCalled.add(msg.playerId);
+    this.reportedBody = undefined;
     this.startMeeting();
   }
 
@@ -403,6 +434,15 @@ export default class GameServer implements Party.Server {
     // Clear any pending meeting timers from previous meetings
     this.meetingTimers.forEach(t => clearTimeout(t));
     this.meetingTimers = [];
+
+    // Snapshot player locations at meeting start
+    this.meetingLocations = {};
+    for (const [id, p] of Object.entries(this.gameState.players)) {
+      if (p.status === 'alive') {
+        const loc = this.gameState.locations.find(l => l.id === p.location);
+        this.meetingLocations[id] = loc?.name || p.location;
+      }
+    }
 
     this.lastMeetingTime = Date.now();
     this.meetingStartedAt = Date.now();
@@ -438,15 +478,20 @@ export default class GameServer implements Party.Server {
 
   handleChat(msg: ClientMessage) {
     if (!this.gameState) return;
+    // Only allow chat during meeting/voting phases
+    if (this.gameState.phase !== 'meeting' && this.gameState.phase !== 'voting') return;
 
     const player = this.gameState.players[msg.playerId];
 
     if (player && player.status === 'alive') {
+      const message = typeof msg.data.message === 'string' ? msg.data.message.slice(0, 200) : '';
+      if (!message) return;
+
       this.gameState.chat.push({
         id: `${Date.now()}-${msg.playerId}`,
         playerId: msg.playerId,
         playerName: player.name,
-        message: msg.data.message,
+        message,
         timestamp: Date.now(),
       });
 
@@ -467,33 +512,23 @@ export default class GameServer implements Party.Server {
     // Can't change your vote
     if (this.gameState.votes[playerId] !== undefined) return;
 
-    // Validate vote target: must be 'skip' or an alive player
+    // Can't vote for yourself
     const targetId = data.votedForId;
+    if (targetId === playerId) return;
+
+    // Validate vote target: must be 'skip' or an alive player
     if (targetId !== 'skip') {
       const target = this.gameState.players[targetId];
       if (!target || target.status !== 'alive') return;
     }
 
     this.gameState.votes[playerId] = targetId;
-  }
 
-  handleKonamiKill() {
-    if (!this.gameState) return;
-    // Only allow during active gameplay phases (not lobby, not already game over)
-    if (this.gameState.phase === 'lobby' || this.gameState.phase === 'gameOver') return;
-
-    // Clear all timers
-    this.meetingTimers.forEach(t => clearTimeout(t));
-    this.meetingTimers = [];
-    if (this.gameTimerHandle) clearTimeout(this.gameTimerHandle);
-
-    Object.values(this.gameState.players).forEach(p => {
-      p.status = 'dead';
-    });
-
-    this.gameState.phase = 'gameOver';
-    this.gameState.winner = 'konami';
-    this.broadcastFiltered();
+    // Short-circuit: end voting early when all alive players have voted
+    const allAlive = Object.values(this.gameState.players).filter(p => p.status === 'alive');
+    if (allAlive.every(p => this.gameState!.votes[p.id] !== undefined)) {
+      this.countVotes();
+    }
   }
 
   handleSabotage(msg: ClientMessage) {
@@ -515,21 +550,21 @@ export default class GameServer implements Party.Server {
     if (sabotageType === 'lightsOut') {
       this.lastSabotageTime = now;
       this.gameState.lightsOut = { until: now + 30000 };
-      setTimeout(() => {
-        if (this.gameState) {
+      this.ephemeralTimers.push(setTimeout(() => {
+        if (this.gameState && this.gameState.phase === 'playing') {
           this.gameState.lightsOut = undefined;
           this.broadcastFiltered();
         }
-      }, 30000);
+      }, 30000));
     } else if (sabotageType === 'doorsLocked') {
       this.lastSabotageTime = now;
       this.gameState.doorsLocked = { until: now + 25000 };
-      setTimeout(() => {
-        if (this.gameState) {
+      this.ephemeralTimers.push(setTimeout(() => {
+        if (this.gameState && this.gameState.phase === 'playing') {
           this.gameState.doorsLocked = undefined;
           this.broadcastFiltered();
         }
-      }, 25000);
+      }, 25000));
     } else if (sabotageType === 'scramble') {
       this.lastSabotageTime = now;
       // Randomly teleport all alive players to different rooms
@@ -540,12 +575,12 @@ export default class GameServer implements Party.Server {
       }
       // Brief flash so players know what happened
       this.gameState.scrambled = { until: now + 3000 };
-      setTimeout(() => {
-        if (this.gameState) {
+      this.ephemeralTimers.push(setTimeout(() => {
+        if (this.gameState && this.gameState.phase === 'playing') {
           this.gameState.scrambled = undefined;
           this.broadcastFiltered();
         }
-      }, 3000);
+      }, 3000));
     }
   }
 
@@ -578,16 +613,17 @@ export default class GameServer implements Party.Server {
 
     // Auto-clear powerup after 30s
     const pid = msg.playerId;
-    setTimeout(() => {
+    this.ephemeralTimers.push(setTimeout(() => {
       if (this.gameState?.players[pid]?.powerup) {
         this.gameState.players[pid].powerup = undefined;
         this.broadcastFiltered();
       }
-    }, 30000);
+    }, 30000));
   }
 
   countVotes() {
     if (!this.gameState) return;
+    if (this.gameState.phase !== 'voting') return; // Prevent double-fire
 
     const voteCounts: Record<string, number> = {};
 
@@ -650,9 +686,8 @@ export default class GameServer implements Party.Server {
           startTime: Date.now(),
         };
         this.startGameTimer(); // Resume game clock
+        this.checkWinCondition(); // Check before broadcast to avoid flicker
         this.broadcastFiltered();
-
-        this.checkWinCondition();
       }
     }, 5000);
     this.meetingTimers.push(resumeTimer);
@@ -723,6 +758,8 @@ export default class GameServer implements Party.Server {
     // Clear all timers
     this.meetingTimers.forEach(t => clearTimeout(t));
     this.meetingTimers = [];
+    this.ephemeralTimers.forEach(t => clearTimeout(t));
+    this.ephemeralTimers = [];
     if (this.gameTimerHandle) {
       clearTimeout(this.gameTimerHandle);
       this.gameTimerHandle = null;
@@ -743,6 +780,8 @@ export default class GameServer implements Party.Server {
     // Clear all timers
     this.meetingTimers.forEach(t => clearTimeout(t));
     this.meetingTimers = [];
+    this.ephemeralTimers.forEach(t => clearTimeout(t));
+    this.ephemeralTimers = [];
     if (this.gameTimerHandle) {
       clearTimeout(this.gameTimerHandle);
       this.gameTimerHandle = null;
@@ -780,6 +819,9 @@ export default class GameServer implements Party.Server {
     this.lastEjection = undefined;
     this.gameTimeRemaining = 0;
     this._gameTimerStartedAt = 0;
+    this.meetingsCalled = new Set();
+    this.meetingLocations = {};
+    this.reportedBody = undefined;
     this.disconnectTimers.forEach(t => clearTimeout(t));
     this.disconnectTimers.clear();
   }
@@ -888,17 +930,50 @@ export default class GameServer implements Party.Server {
     const completedTasks = allInnocents.reduce((sum, p) => sum + p.tasksCompleted, 0);
     const taskProgress = totalTasks > 0 ? { completed: completedTasks, total: totalTasks } : undefined;
 
+    // Cooldowns (only during playing phase)
+    let cooldowns: { kill?: number; sabotage?: number; meeting?: number; meetingUsed?: boolean } | undefined;
+    if (gs.phase === 'playing') {
+      cooldowns = {};
+      if (isImpostor) {
+        const killEnd = (this.lastKillTimes[playerId] || 0) + GAME_CONFIG.KILL_COOLDOWN * 1000;
+        if (killEnd > Date.now()) cooldowns.kill = killEnd;
+        const sabEnd = this.lastSabotageTime + 45000;
+        if (sabEnd > Date.now()) cooldowns.sabotage = sabEnd;
+      }
+      const meetEnd = this.lastMeetingTime + 30000;
+      if (meetEnd > Date.now()) cooldowns.meeting = meetEnd;
+      if (this.meetingsCalled.has(playerId)) cooldowns.meetingUsed = true;
+    }
+
+    // Game time remaining (for non-playing phases to show game clock)
+    let gameTimeRemaining: number | undefined;
+    if (['meeting', 'voting', 'results'].includes(gs.phase) && this.gameTimeRemaining > 0) {
+      gameTimeRemaining = Math.ceil(this.gameTimeRemaining / 1000);
+    }
+
+    // Strip secret room's connectedTo to prevent anti-cheat leak
+    const filteredLocations = gs.locations.map(l =>
+      l.id === 'secret' ? { ...l, connectedTo: [] } : l
+    );
+
     return {
       ...gs,
       players: filteredPlayers,
       tasks: filteredTasks,
+      locations: filteredLocations,
       sixthSenseWarning: sixthSenseWarning || undefined,
       bloodhoundTarget,
       taskProgress,
+      cooldowns,
+      gameTimeRemaining,
       // Strip secret room internals — client only needs to know if they're at the entrance
       secretRoomMethod: player.location === gs.secretRoomEntrance ? gs.secretRoomMethod : undefined,
       secretRoomEntrance: undefined, // Never send the entrance room ID
       atSecretEntrance: player.location === gs.secretRoomEntrance || undefined,
+      // Player locations at meeting start (shown during meeting/voting)
+      meetingLocations: (gs.phase === 'meeting' || gs.phase === 'voting') ? this.meetingLocations : undefined,
+      // Body report info (shown during meeting/voting)
+      reportedBody: (gs.phase === 'meeting' || gs.phase === 'voting') ? this.reportedBody : undefined,
       // Include ejection result during results phase so clients can show the true role
       ejectionResult: gs.phase === 'results' && this.lastEjection
         ? { playerId: this.lastEjection.playerId, role: this.lastEjection.role, name: gs.players[this.lastEjection.playerId]?.name || '???' }
@@ -912,15 +987,16 @@ export default class GameServer implements Party.Server {
 
     if (!playerId || !this.gameState) return;
 
+    // If host left, pass to next player (works in all phases)
+    if (this.hostId === playerId) {
+      const remaining = Object.keys(this.gameState.players).filter(id => id !== playerId);
+      this.hostId = remaining.length > 0 ? remaining[0] : null;
+      this.gameState.hostId = this.hostId || undefined;
+    }
+
     // In lobby: remove the player entirely
     if (this.gameState.phase === 'lobby') {
       delete this.gameState.players[playerId];
-      // If host left, pass to next player
-      if (this.hostId === playerId) {
-        const remaining = Object.keys(this.gameState.players);
-        this.hostId = remaining.length > 0 ? remaining[0] : null;
-        this.gameState.hostId = this.hostId || undefined;
-      }
       this.broadcastFiltered();
       return;
     }
@@ -936,13 +1012,12 @@ export default class GameServer implements Party.Server {
     if (!player || player.status !== 'alive') return;
 
     const timer = setTimeout(() => {
-      if (this.gameState?.players[playerId]?.status === 'alive' &&
-          this.gameState.phase === 'playing') {
-        this.gameState.players[playerId].status = 'dead';
-        this.disconnectTimers.delete(playerId);
-        this.checkWinCondition();
-        this.broadcastFiltered();
-      }
+      if (!this.gameState?.players[playerId] || this.gameState.players[playerId].status !== 'alive') return;
+      if (this.gameState.phase === 'lobby' || this.gameState.phase === 'gameOver') return;
+      this.gameState.players[playerId].status = 'dead';
+      this.disconnectTimers.delete(playerId);
+      this.checkWinCondition();
+      this.broadcastFiltered();
     }, 300000);
     this.disconnectTimers.set(playerId, timer);
   }

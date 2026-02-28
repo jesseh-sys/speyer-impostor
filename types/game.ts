@@ -45,11 +45,6 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-export interface VoteResult {
-  playerId: string;
-  votes: string[]; // Array of player IDs who voted for them
-}
-
 export interface GameState {
   roomCode: string;
   phase: GamePhase;
@@ -68,7 +63,7 @@ export interface GameState {
     duration: number;
     startTime: number;
   };
-  winner?: 'innocents' | 'impostors' | 'konami';
+  winner?: 'innocents' | 'impostors';
   lightsOut?: {
     until: number; // timestamp when lights come back
   };
@@ -84,9 +79,18 @@ export interface GameState {
   atSecretEntrance?: boolean; // Server tells client if they're at the secret entrance
   ejectionResult?: { playerId: string; role: PlayerRole; name: string } | null; // Set during results phase
   scrambled?: { until: number }; // Brief flash when scramble happens
+  cooldowns?: {
+    kill?: number;      // timestamp when kill cooldown ends
+    sabotage?: number;  // timestamp when sabotage cooldown ends
+    meeting?: number;   // timestamp when meeting cooldown ends
+    meetingUsed?: boolean; // player already used their 1 emergency meeting
+  };
+  gameTimeRemaining?: number; // game clock seconds remaining (sent during meetings/voting/results)
+  meetingLocations?: Record<string, string>; // playerId -> locationName at meeting start
+  reportedBody?: { name: string; location: string; reportedBy: string }; // whose body triggered the meeting
 }
 
-export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame';
+export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame';
 
 export interface ClientMessage {
   type: ClientMessageType;
@@ -94,7 +98,3 @@ export interface ClientMessage {
   data?: any;
 }
 
-export interface ServerMessage {
-  type: 'gameState' | 'playerJoined' | 'playerLeft' | 'error';
-  data: any;
-}
