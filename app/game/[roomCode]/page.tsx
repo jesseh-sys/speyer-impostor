@@ -1330,8 +1330,6 @@ export default function Game() {
             <div className="mb-4">
               {killCooldownLeft > 0 ? (
                 <p className="text-[var(--dim)] text-lg">KILL [{killCooldownLeft}s]</p>
-              ) : isDoorsLocked ? (
-                <p className="text-[var(--dim)] text-lg">KILL [doors locked]</p>
               ) : killPending ? (
                 <p className="text-[var(--dim)] text-lg">KILL [...]</p>
               ) : killTargets.length > 0 ? (

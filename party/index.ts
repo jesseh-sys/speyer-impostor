@@ -352,9 +352,6 @@ export default class GameServer implements Party.Server {
   handleKill(msg: ClientMessage) {
     if (!this.gameState || this.gameState.phase !== 'playing') return;
 
-    // Can't kill during door lock — prevents the lock+kill trap
-    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) return;
-
     const { playerId, data } = msg;
     const killer = this.gameState.players[playerId];
     const victim = this.gameState.players[data.victimId];
