@@ -79,8 +79,8 @@ export default function Game() {
   // Idle flavor
   const [flavorLines, setFlavorLines] = useState<string[]>([]);
 
-  // Body discovery tracking
-  const discoveredBodyRef = useRef<string | null>(null);
+  // Body discovery tracking (Set to prevent re-triggers when other kills happen)
+  const discoveredBodiesRef = useRef<Set<string>>(new Set());
 
   // Grue tracking
   const [grueWarning, setGrueWarning] = useState(0);
@@ -119,21 +119,21 @@ export default function Game() {
     onMessage(event) {
       const msg = JSON.parse(event.data);
       if (msg.type === 'gameState') {
-        // Check if a pending kill was blocked by shield
+        // Check if a pending kill failed (not shield — that has its own message)
         const victimId = pendingKillRef.current;
         if (victimId && msg.data.players?.[victimId]?.status === 'alive') {
-          const victim = msg.data.players[victimId];
-          if (victim?.powerup === undefined) {
-            // Kill was silently rejected (cooldown, target moved, etc.)
-            setShieldBlockMsg(`Kill failed. Try again.`);
-          } else {
-            setShieldBlockMsg(`Something protected ${victim?.name || 'them'}. Your attack failed.`);
-          }
+          setShieldBlockMsg('Kill failed. Try again.');
           setTimeout(() => setShieldBlockMsg(null), 3000);
         }
         pendingKillRef.current = null;
         setKillPending(false);
         setGameState(msg.data);
+      }
+      if (msg.type === 'shieldBlocked') {
+        pendingKillRef.current = null;
+        setKillPending(false);
+        setShieldBlockMsg(`Something protected ${msg.data?.victimName || 'them'}. Your attack failed.`);
+        setTimeout(() => setShieldBlockMsg(null), 3000);
       }
     },
   });
@@ -234,10 +234,15 @@ export default function Game() {
   useEffect(() => {
     if (gameState?.phase !== 'playing' || narrative) return;
     setFlavorLines([]);
-    const interval = setInterval(() => {
-      setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor(playerLocationRef.current)]);
-    }, 12000 + Math.random() * 8000);
-    return () => clearInterval(interval);
+    let timer: NodeJS.Timeout;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        setFlavorLines(prev => [...prev.slice(-2), getIdleFlavor(playerLocationRef.current)]);
+        schedule();
+      }, 12000 + Math.random() * 8000);
+    };
+    schedule();
+    return () => clearTimeout(timer);
   }, [gameState?.phase, !!narrative]);
 
   // Clear flavor when moving
@@ -290,13 +295,15 @@ export default function Game() {
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [gameState?.phase, gameState?.players?.[playerId]?.location, gameState?.players?.[playerId]?.status]);
 
-  // ── Powerup countdown tick ─────────────────────
+  // ── Countdown tick (powerups + cooldowns) ─────────────────────
   useEffect(() => {
     const player = gameState?.players?.[playerId];
-    if (!player?.powerup || player.powerup.until <= Date.now()) return;
+    const hasPowerup = player?.powerup && player.powerup.until > Date.now();
+    const hasCooldown = gameState?.cooldowns?.kill || gameState?.cooldowns?.sabotage || gameState?.cooldowns?.meeting;
+    if (!hasPowerup && !hasCooldown) return;
     const interval = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(interval);
-  }, [gameState?.players?.[playerId]?.powerup?.until]);
+  }, [gameState?.players?.[playerId]?.powerup?.until, gameState?.cooldowns?.kill, gameState?.cooldowns?.sabotage, gameState?.cooldowns?.meeting]);
 
   // ── Derived values ────────────────────────────
   const currentPlayer = gameState ? gameState.players[playerId] : null;
@@ -338,11 +345,12 @@ export default function Game() {
 
   // ── Body discovery ──────────────────────────
 
+  // Clear discovered bodies only when all bodies are cleared (after meeting)
   useEffect(() => {
     if (!gameState?.deadBodies?.length) {
-      discoveredBodyRef.current = null;
+      discoveredBodiesRef.current = new Set();
     }
-  }, [gameState?.deadBodies?.length]);
+  }, [!gameState?.deadBodies?.length]);
 
   useEffect(() => {
     if (narrative) return;
@@ -350,11 +358,11 @@ export default function Game() {
     if (currentPlayer.status === 'dead') return;
 
     const bodyHere = gameState.deadBodies.find(
-      b => b.location === currentPlayer.location && b.playerId !== discoveredBodyRef.current
+      b => b.location === currentPlayer.location && !discoveredBodiesRef.current.has(b.playerId)
     );
     if (!bodyHere) return;
 
-    discoveredBodyRef.current = bodyHere.playerId;
+    discoveredBodiesRef.current.add(bodyHere.playerId);
     const bodyPlayer = gameState.players[bodyHere.playerId];
     const template = getDiscoveryNarrative(bodyPlayer?.name || 'someone');
     startNarrative(
@@ -467,7 +475,7 @@ export default function Game() {
   const handleKill = (victimId: string) => {
     if (killPending) return; // Prevent double-fire
     // Send kill immediately — target can't escape during narrative
-    discoveredBodyRef.current = victimId;
+    discoveredBodiesRef.current.add(victimId);
     pendingKillRef.current = victimId;
     setKillPending(true);
     socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
@@ -602,7 +610,7 @@ export default function Game() {
             <p className="text-[var(--green)] glow text-3xl mt-4 tracking-widest">
               INNOCENT
             </p>
-            <p className="text-[var(--dim)] mt-3">Complete tasks. Report bodies.</p>
+            <p className="text-[var(--dim)] mt-3">Complete ALL tasks to win. Report bodies.</p>
             <p className="text-[var(--dim)] mt-1">Trust no one.</p>
           </>
         )}
@@ -966,6 +974,7 @@ export default function Game() {
                   <p key={pid} className="text-base ml-2">
                     <span style={{ color: p.color }}>{p.name}</span>
                     <span className="text-[var(--dim)]"> — {locName}</span>
+                    <span className="text-[var(--dim)]"> [{p.tasksCompleted}/{p.totalTasks} tasks]</span>
                   </p>
                 );
               })}
@@ -1106,7 +1115,7 @@ export default function Game() {
         {gameState.taskProgress && (
           <div className="mt-1">
             <div className="flex items-center gap-2">
-              <span className="text-[var(--dim)] text-base">TASKS</span>
+              <span className="text-[var(--dim)] text-base">TASKS (fill to win)</span>
               <div className="flex-1 h-4 border border-[var(--dim)]">
                 <div
                   className="h-full bg-[var(--green)]"
@@ -1291,7 +1300,7 @@ export default function Game() {
         <div className="mb-4">
           <p className="text-[var(--cyan)] text-lg">SCANNING ALL LOCATIONS:</p>
           {Object.values(gameState.players)
-            .filter(p => p.status === 'alive' && p.id !== playerId)
+            .filter(p => p.status === 'alive' && p.id !== playerId && p.location !== '__shadow__')
             .map(p => {
               const loc = gameState.locations.find(l => l.id === p.location);
               return (

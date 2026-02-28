@@ -105,7 +105,7 @@ export const TASKS: Omit<Task, 'id'>[] = [
 export const GAME_CONFIG = {
   MIN_PLAYERS: 4,
   MAX_PLAYERS: 15,
-  DISCUSSION_TIME: 30,
+  DISCUSSION_TIME: 60,
   VOTING_TIME: 30,
   GAME_DURATION: 600,
   TASKS_PER_PLAYER: 5,

@@ -62,6 +62,11 @@ export default class GameServer implements Party.Server {
     // 'join' and 'identify' establish the connection-to-player mapping
     if (msg.type === 'join' || msg.type === 'identify') {
       if (msg.playerId) {
+        // Clean up if this connection was previously mapped to a different player
+        const previousId = this.connectionToPlayer.get(sender.id);
+        if (previousId && previousId !== msg.playerId && this.gameState.phase === 'lobby') {
+          delete this.gameState.players[previousId];
+        }
         this.connectionToPlayer.set(sender.id, msg.playerId);
         // Cancel disconnect timer if they're reconnecting
         const dcTimer = this.disconnectTimers.get(msg.playerId);
@@ -139,9 +144,12 @@ export default class GameServer implements Party.Server {
     if (!this.gameState) return;
 
     const playerId = msg.playerId;
-    let playerName = msg.data.playerName;
-    let icon = msg.data.icon || '@';
-    let color = msg.data.color || PLAYER_COLORS[0];
+    let playerName = typeof msg.data.playerName === 'string'
+      ? msg.data.playerName.trim().slice(0, 15)
+      : 'Anonymous';
+    if (!playerName) playerName = 'Anonymous';
+    let icon = typeof msg.data.icon === 'string' ? msg.data.icon.slice(0, 2) : '@';
+    let color = typeof msg.data.color === 'string' ? msg.data.color.slice(0, 10) : PLAYER_COLORS[0];
 
     // If player already exists, just update their connection (reconnection)
     if (this.gameState.players[playerId]) {
@@ -279,6 +287,12 @@ export default class GameServer implements Party.Server {
       secretLoc.connectedTo = [entranceRoom];
     }
 
+    // Initial kill cooldown — give innocents time to spread out
+    const now = Date.now();
+    impostorIds.forEach(id => {
+      this.lastKillTimes[id] = now;
+    });
+
     // Game timer — innocents win if time runs out (impostors must act)
     this.gameTimeRemaining = GAME_CONFIG.GAME_DURATION * 1000;
     this.startGameTimer();
@@ -373,6 +387,12 @@ export default class GameServer implements Party.Server {
     if (victim.powerup?.type === 'shield' && victim.powerup.until > Date.now()) {
       victim.powerup = undefined; // Shield consumed
       this.lastKillTimes[playerId] = now; // Cooldown still triggers
+      // Notify the killer directly
+      for (const conn of this.room.getConnections()) {
+        if (this.connectionToPlayer.get(conn.id) === playerId) {
+          conn.send(JSON.stringify({ type: 'shieldBlocked', data: { victimName: victim.name } }));
+        }
+      }
       return;
     }
 
