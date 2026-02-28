@@ -90,8 +90,9 @@ export default function Game() {
   const [secretRoomFound, setSecretRoomFound] = useState(false);
   const secretTapRef = useRef({ count: 0, lastTap: 0 });
 
-  // Track pending kill to detect shield block
+  // Track pending kill to detect shield block / silent rejection
   const pendingKillRef = useRef<string | null>(null);
+  const [killPending, setKillPending] = useState(false);
   const [shieldBlockMsg, setShieldBlockMsg] = useState<string | null>(null);
 
   // Powerup countdown tick (forces re-render for live timer)
@@ -121,11 +122,17 @@ export default function Game() {
         // Check if a pending kill was blocked by shield
         const victimId = pendingKillRef.current;
         if (victimId && msg.data.players?.[victimId]?.status === 'alive') {
-          const victimName = msg.data.players[victimId]?.name || 'them';
-          setShieldBlockMsg(`Something protected ${victimName}. Your attack failed.`);
+          const victim = msg.data.players[victimId];
+          if (victim?.powerup === undefined) {
+            // Kill was silently rejected (cooldown, doors locked, target moved, etc.)
+            setShieldBlockMsg(`${victim?.name || 'Target'} slipped away. Kill failed.`);
+          } else {
+            setShieldBlockMsg(`Something protected ${victim?.name || 'them'}. Your attack failed.`);
+          }
           setTimeout(() => setShieldBlockMsg(null), 3000);
         }
         pendingKillRef.current = null;
+        setKillPending(false);
         setGameState(msg.data);
       }
     },
@@ -458,9 +465,11 @@ export default function Game() {
   };
 
   const handleKill = (victimId: string) => {
+    if (killPending) return; // Prevent double-fire
     // Send kill immediately — target can't escape during narrative
     discoveredBodyRef.current = victimId;
     pendingKillRef.current = victimId;
+    setKillPending(true);
     socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
     // Show kill narrative as flavor
     const victim = gameState?.players[victimId];
@@ -1321,6 +1330,10 @@ export default function Game() {
             <div className="mb-4">
               {killCooldownLeft > 0 ? (
                 <p className="text-[var(--dim)] text-lg">KILL [{killCooldownLeft}s]</p>
+              ) : isDoorsLocked ? (
+                <p className="text-[var(--dim)] text-lg">KILL [doors locked]</p>
+              ) : killPending ? (
+                <p className="text-[var(--dim)] text-lg">KILL [...]</p>
               ) : killTargets.length > 0 ? (
                 <>
                   <p className="text-[var(--red)] text-lg">TARGETS:</p>
