@@ -187,17 +187,23 @@ export default function Game() {
     }
   }, [gameState?.phase]);
 
-  // ── Auto-dismiss narrative on phase change ────
+  // ── Auto-dismiss narrative + kill state on phase change ────
   // If a meeting/vote/results/gameOver starts while player is in a narrative,
   // dismiss it immediately so they can participate
   useEffect(() => {
-    if (!narrative) return;
     if (gameState?.phase && gameState.phase !== 'playing') {
-      if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
-      pendingNarrativeActionRef.current = null;
-      setNarrative(null);
-      setResultText(null);
-      setShowChoices(false);
+      // Clear pending kill state so "Kill failed" doesn't show during meetings
+      pendingKillRef.current = null;
+      setKillPending(false);
+      setShieldBlockMsg(null);
+
+      if (narrative) {
+        if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+        pendingNarrativeActionRef.current = null;
+        setNarrative(null);
+        setResultText(null);
+        setShowChoices(false);
+      }
     }
   }, [gameState?.phase]);
 

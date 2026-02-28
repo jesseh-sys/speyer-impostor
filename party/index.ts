@@ -63,6 +63,17 @@ export default class GameServer implements Party.Server {
     // 'join' and 'identify' establish the connection-to-player mapping
     if (msg.type === 'join' || msg.type === 'identify') {
       if (msg.playerId) {
+        // Prevent session hijacking: reject if another ACTIVE connection already owns this playerId
+        const existingConnId = this.connectionToPlayer.get(sender.id);
+        if (existingConnId !== msg.playerId) {
+          for (const [connId, pid] of this.connectionToPlayer) {
+            if (pid === msg.playerId && connId !== sender.id) {
+              // Another connection already owns this playerId — reject
+              console.warn('Session hijack attempt blocked:', sender.id, 'tried to claim', msg.playerId);
+              return;
+            }
+          }
+        }
         // Clean up if this connection was previously mapped to a different player
         const previousId = this.connectionToPlayer.get(sender.id);
         if (previousId && previousId !== msg.playerId && this.gameState.phase === 'lobby') {
@@ -1038,10 +1049,14 @@ export default class GameServer implements Party.Server {
 
     if (!playerId || !this.gameState) return;
 
-    // If host left, pass to next player (works in all phases)
+    // If host left, pass to next player — prefer players with active connections
     if (this.hostId === playerId) {
       const remaining = Object.keys(this.gameState.players).filter(id => id !== playerId);
-      this.hostId = remaining.length > 0 ? remaining[0] : null;
+      const connectedPlayerIds = new Set(this.connectionToPlayer.values());
+      const connectedRemaining = remaining.filter(id => connectedPlayerIds.has(id));
+      const newHost = connectedRemaining.length > 0 ? connectedRemaining[0]
+        : remaining.length > 0 ? remaining[0] : null;
+      this.hostId = newHost;
       this.gameState.hostId = this.hostId || undefined;
     }
 
