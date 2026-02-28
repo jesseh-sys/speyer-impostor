@@ -538,6 +538,63 @@ const EASTER_EGG_KILL: {
   },
 ];
 
+// ── SECRET ROOM ──────────────────────────────────
+// Each game, only ONE discovery method is active. This keeps the
+// secret room feeling mysterious across multiple playthroughs.
+
+const SECRET_ROOM_BY_METHOD: Record<string, NarrativeTemplate> = {
+  piano: {
+    lines: [
+      "You notice something behind the piano.",
+      "A seam in the wall. A door?",
+      "It shouldn't be here.",
+      "Room 404. Not Found.",
+      "...except it is.",
+    ],
+    choiceA: { label: "Enter Room 404", result: "The door opens. A terminal glows in the darkness." },
+    choiceB: { label: "Back away", result: "The seam fades. Was it ever there?" },
+  },
+  shelves: {
+    lines: [
+      "A faint hum comes from behind the sheet music shelves.",
+      "You push them aside.",
+      "A door. Old. Wrong.",
+      "The handle is warm.",
+    ],
+    choiceA: { label: "Open it", result: "The room beyond glows with green light." },
+    choiceB: { label: "Leave it", result: "The hum stops. The shelves slide back." },
+  },
+  cases: {
+    lines: [
+      "The instrument cases rattle.",
+      "One of them isn't a case.",
+      "It's a passage.",
+      "Room 404.",
+    ],
+    choiceA: { label: "Crawl through", result: "The passage leads to a room that shouldn't exist." },
+    choiceB: { label: "Close it", result: "It latches shut. The rattling stops." },
+  },
+};
+
+export function getSecretRoomNarrative(method: string): NarrativeTemplate {
+  return SECRET_ROOM_BY_METHOD[method] || SECRET_ROOM_BY_METHOD.piano;
+}
+
+// ── POWERUP ACTIVATION ───────────────────────────
+
+const POWERUP_DESCRIPTIONS: Record<string, string> = {
+  sixthSense: 'SIXTH SENSE — You feel a warning when the impostor is near.',
+  radar: 'RADAR — You can see where everyone is.',
+  shield: 'SHIELD — The next kill attempt on you will fail.',
+  shadowWalk: 'SHADOW WALK — You are invisible to innocents.',
+  tracker: 'TRACKER — You can see where everyone is.',
+  bloodhound: 'BLOODHOUND — You can sense the most isolated player.',
+};
+
+export function getPowerupDescription(type: string): string {
+  return POWERUP_DESCRIPTIONS[type] || 'UNKNOWN POWER';
+}
+
 export function getIdleFlavor(locationId?: string): string {
   // ~1% chance of easter egg
   if (Math.random() < EASTER_EGG_CHANCE) {

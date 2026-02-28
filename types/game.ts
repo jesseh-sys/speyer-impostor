@@ -2,6 +2,8 @@ export type PlayerRole = 'innocent' | 'impostor';
 export type PlayerStatus = 'alive' | 'dead';
 export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'voting' | 'results' | 'gameOver';
 
+export type PowerupType = 'sixthSense' | 'radar' | 'shield' | 'shadowWalk' | 'tracker' | 'bloodhound';
+
 export interface Player {
   id: string;
   name: string;
@@ -12,6 +14,10 @@ export interface Player {
   icon: string; // Emoji or character icon
   tasksCompleted: number;
   totalTasks: number;
+  powerup?: {
+    type: PowerupType;
+    until: number; // timestamp when it expires
+  };
 }
 
 export interface Task {
@@ -65,10 +71,11 @@ export interface GameState {
   lightsOut?: {
     until: number; // timestamp when lights come back
   };
+  secretRoomMethod?: 'piano' | 'shelves' | 'cases'; // which discovery is active this game
 }
 
 export interface ClientMessage {
-  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage';
+  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage' | 'enterSecretRoom';
   playerId: string;
   data?: any;
 }

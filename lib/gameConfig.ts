@@ -69,6 +69,11 @@ export const LOCATIONS: Location[] = [
     description: 'The filing cabinet is open. Someone was here recently. The chair is still spinning slowly.',
     x: 80, y: 50, connectedTo: ['suib', 'deard'],
   },
+  {
+    id: 'secret', name: 'Room 404',
+    description: 'This room shouldn\'t exist. The walls hum. A terminal glows in the corner. It knows your name.',
+    x: 60, y: 80, connectedTo: ['music'],
+  },
 ];
 
 export const TASKS: Omit<Task, 'id'>[] = [

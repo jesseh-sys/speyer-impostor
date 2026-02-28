@@ -1,5 +1,5 @@
 import type * as Party from "partykit/server";
-import { GameState, Player, ClientMessage, PlayerRole, Task } from "../types/game";
+import { GameState, Player, ClientMessage, PlayerRole, Task, PowerupType } from "../types/game";
 import { LOCATIONS, TASKS, PLAYER_ICONS, PLAYER_COLORS, GAME_CONFIG, getImpostorCount } from "../lib/gameConfig";
 
 export default class GameServer implements Party.Server {
@@ -72,6 +72,9 @@ export default class GameServer implements Party.Server {
       case 'sabotage':
         this.handleSabotage(msg);
         break;
+      case 'enterSecretRoom':
+        this.handleEnterSecretRoom(msg);
+        break;
     }
 
     this.broadcast();
@@ -143,9 +146,13 @@ export default class GameServer implements Party.Server {
       return; // Not enough players
     }
 
-    // Assign impostor roles
+    // Assign impostor roles — Fisher-Yates shuffle for true randomness
     const impostorCount = getImpostorCount(playerCount);
-    const shuffled = [...playerIds].sort(() => Math.random() - 0.5);
+    const shuffled = [...playerIds];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     const impostorIds = shuffled.slice(0, impostorCount);
 
     impostorIds.forEach(id => {
@@ -166,6 +173,10 @@ export default class GameServer implements Party.Server {
       duration: GAME_CONFIG.GAME_DURATION,
       startTime: Date.now(),
     };
+
+    // Pick which secret room discovery method is active this game
+    const methods = ['piano', 'shelves', 'cases'] as const;
+    this.gameState.secretRoomMethod = methods[Math.floor(Math.random() * methods.length)];
   }
 
   assignTasks(playerId: string) {
@@ -219,6 +230,13 @@ export default class GameServer implements Party.Server {
     const victim = this.gameState.players[data.victimId];
 
     if (killer && killer.role === 'impostor' && victim && victim.status === 'alive') {
+      // Shield powerup blocks the kill
+      if (victim.powerup?.type === 'shield' && victim.powerup.until > Date.now()) {
+        // Shield consumed on use — clear it
+        victim.powerup = undefined;
+        return;
+      }
+
       victim.status = 'dead';
 
       this.gameState.deadBody = {
@@ -337,6 +355,43 @@ export default class GameServer implements Party.Server {
         }
       }, 30000);
     }
+  }
+
+  handleEnterSecretRoom(msg: ClientMessage) {
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+
+    const player = this.gameState.players[msg.playerId];
+    if (!player || player.status !== 'alive') return;
+
+    // Must be in the Music Room (the connected room)
+    if (player.location !== 'music') return;
+
+    // Already have an active powerup? Can't stack.
+    if (player.powerup && player.powerup.until > Date.now()) return;
+
+    // Move player to secret room
+    player.location = 'secret';
+
+    // Assign random powerup based on role
+    const INNOCENT_POWERUPS: PowerupType[] = ['sixthSense', 'radar', 'shield'];
+    const IMPOSTOR_POWERUPS: PowerupType[] = ['shadowWalk', 'tracker', 'bloodhound'];
+
+    const pool = player.role === 'impostor' ? IMPOSTOR_POWERUPS : INNOCENT_POWERUPS;
+    const powerup = pool[Math.floor(Math.random() * pool.length)];
+
+    player.powerup = {
+      type: powerup,
+      until: Date.now() + 30000, // 30 seconds
+    };
+
+    // Auto-clear powerup after 30s
+    const pid = msg.playerId;
+    setTimeout(() => {
+      if (this.gameState?.players[pid]?.powerup) {
+        this.gameState.players[pid].powerup = undefined;
+        this.broadcast();
+      }
+    }, 30000);
   }
 
   countVotes() {

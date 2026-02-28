@@ -13,6 +13,8 @@ import {
   getDiscoveryNarrative,
   getMeetingNarrative,
   getIdleFlavor,
+  getSecretRoomNarrative,
+  getPowerupDescription,
 } from '@/lib/narrative';
 
 // ── Narrative state ──────────────────────────────
@@ -52,6 +54,13 @@ export default function Game() {
   // Grue tracking
   const [grueWarning, setGrueWarning] = useState(0); // 0=none, 1=dark, 2=grue
   const grueTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Secret room discovery
+  const [secretRoomFound, setSecretRoomFound] = useState(false);
+  const secretTapRef = useRef({ count: 0, lastTap: 0 });
+
+  // Powerup countdown tick (forces re-render for live timer)
+  const [, setTick] = useState(0);
 
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
@@ -201,6 +210,14 @@ export default function Game() {
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [gameState?.phase, gameState?.players?.[playerId]?.location, gameState?.players?.[playerId]?.status]);
 
+  // ── Powerup countdown tick ─────────────────────
+  useEffect(() => {
+    const player = gameState?.players?.[playerId];
+    if (!player?.powerup || player.powerup.until <= Date.now()) return;
+    const interval = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [gameState?.players?.[playerId]?.powerup?.until]);
+
   // ── Derived values (needed by effects below) ──
   const currentPlayer = gameState ? gameState.players[playerId] : null;
   const currentLocation = gameState?.locations.find(l => l.id === currentPlayer?.location);
@@ -327,6 +344,31 @@ export default function Game() {
       template,
       () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
       () => {}, // choice B: walk away
+    );
+  };
+
+  // Secret room: tap the Music Room description to discover the hidden exit
+  // The trigger text changes each game based on the active method
+  const handleSecretTap = useCallback(() => {
+    if (secretRoomFound) return;
+    const now = Date.now();
+    const ref = secretTapRef.current;
+    if (now - ref.lastTap > 3000) ref.count = 0;
+    ref.count++;
+    ref.lastTap = now;
+    if (ref.count >= 5) {
+      ref.count = 0;
+      setSecretRoomFound(true);
+    }
+  }, [secretRoomFound]);
+
+  const handleEnterSecretRoom = () => {
+    if (!gameState?.secretRoomMethod) return;
+    const template = getSecretRoomNarrative(gameState.secretRoomMethod);
+    startNarrative(
+      template,
+      () => socket.send(JSON.stringify({ type: 'enterSecretRoom', playerId })),
+      () => {}, // back away
     );
   };
 
@@ -689,9 +731,44 @@ export default function Game() {
 
   const othersHere = playersHere.filter(p => p.id !== playerId);
   const isLightsOut = gameState.lightsOut ? Date.now() < gameState.lightsOut.until : false;
+
+  // Shadow Walk: hide shadow-walking impostors from innocent players' "You see:" list
+  const visibleOthers = currentPlayer.role === 'innocent'
+    ? othersHere.filter(p => !(p.powerup?.type === 'shadowWalk' && p.powerup.until > Date.now()))
+    : othersHere;
+
   const killTargets = currentPlayer.role === 'impostor'
     ? othersHere.filter(p => p.role !== 'impostor')
     : [];
+
+  // Sixth Sense: warn innocents when an impostor is in their room
+  const hasSixthSense = currentPlayer.powerup?.type === 'sixthSense' && currentPlayer.powerup.until > Date.now();
+  const impostorNearby = hasSixthSense && othersHere.some(p => p.role === 'impostor');
+
+  // Radar (innocent) or Tracker (impostor): see all player locations
+  const hasLocationPower = currentPlayer.powerup &&
+    (currentPlayer.powerup.type === 'radar' || currentPlayer.powerup.type === 'tracker') &&
+    currentPlayer.powerup.until > Date.now();
+
+  // Bloodhound: find most isolated player
+  const bloodhoundTarget = (() => {
+    if (currentPlayer.powerup?.type !== 'bloodhound' || !currentPlayer.powerup || currentPlayer.powerup.until <= Date.now()) return null;
+    const alivePlayers = Object.values(gameState.players).filter(
+      p => p.status === 'alive' && p.id !== playerId && p.role !== 'impostor'
+    );
+    if (alivePlayers.length === 0) return null;
+    // Find the player who is most alone (fewest other alive players in their room)
+    let mostIsolated = alivePlayers[0];
+    let leastCompany = Infinity;
+    for (const p of alivePlayers) {
+      const company = alivePlayers.filter(o => o.location === p.location && o.id !== p.id).length;
+      if (company < leastCompany) {
+        leastCompany = company;
+        mostIsolated = p;
+      }
+    }
+    return mostIsolated;
+  })();
 
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto pb-16">
@@ -720,8 +797,28 @@ export default function Game() {
       {/* Location */}
       <div className="mt-4 mb-3">
         <h2 className="text-2xl glow">{currentLocation?.name.toUpperCase()}</h2>
-        <p className="text-[var(--dim)] mt-1 text-lg">{currentLocation?.description}</p>
+        <p
+          className="text-[var(--dim)] mt-1 text-lg"
+          onClick={currentPlayer.location === 'music' ? handleSecretTap : undefined}
+        >
+          {currentLocation?.description}
+        </p>
+        {/* Subtle hint for the active secret room method */}
+        {currentPlayer.location === 'music' && !secretRoomFound && gameState.secretRoomMethod && (
+          <p className="text-[var(--dim)] text-sm mt-1 opacity-60">
+            {gameState.secretRoomMethod === 'piano' && 'Something behind the piano catches your eye...'}
+            {gameState.secretRoomMethod === 'shelves' && 'The sheet music shelves hum faintly...'}
+            {gameState.secretRoomMethod === 'cases' && 'One of the instrument cases rattles...'}
+          </p>
+        )}
       </div>
+
+      {/* Active powerup */}
+      {currentPlayer.powerup && currentPlayer.powerup.until > Date.now() && (
+        <p className="text-[var(--cyan)] glow text-lg mb-2">
+          &#9889; {getPowerupDescription(currentPlayer.powerup.type)} [{Math.max(0, Math.ceil((currentPlayer.powerup.until - Date.now()) / 1000))}s]
+        </p>
+      )}
 
       {/* Lights out banner */}
       {isLightsOut && (
@@ -730,17 +827,24 @@ export default function Game() {
         </p>
       )}
 
+      {/* Sixth Sense warning */}
+      {impostorNearby && (
+        <p className="text-[var(--red)] glow-red text-lg mb-2">
+          &#9888; Your sixth sense tingles. Something is wrong here.
+        </p>
+      )}
+
       {/* Players here */}
       <div className="mb-4">
-        {othersHere.length > 0 ? (
+        {visibleOthers.length > 0 ? (
           <p className="text-lg">
             <span className="text-[var(--dim)]">You see: </span>
             {isLightsOut && currentPlayer.role !== 'impostor' ? (
               <span className="text-[var(--dim)]">
-                {othersHere.map((_, i) => (i > 0 ? ', ' : '') + '???').join('')}
+                {visibleOthers.map((_, i) => (i > 0 ? ', ' : '') + '???').join('')}
               </span>
             ) : (
-              othersHere.map((p, i) => (
+              visibleOthers.map((p, i) => (
                 <span key={p.id}>
                   {i > 0 && ', '}
                   <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
@@ -754,6 +858,34 @@ export default function Game() {
           </p>
         )}
       </div>
+
+      {/* Radar / Tracker — see all player locations */}
+      {hasLocationPower && (
+        <div className="mb-4">
+          <p className="text-[var(--cyan)] text-lg">SCANNING ALL LOCATIONS:</p>
+          {Object.values(gameState.players)
+            .filter(p => p.status === 'alive' && p.id !== playerId)
+            .map(p => {
+              const loc = gameState.locations.find(l => l.id === p.location);
+              return (
+                <p key={p.id} className="text-base ml-2">
+                  <span style={{ color: p.color }}>{p.name}</span>
+                  <span className="text-[var(--dim)]"> — {loc?.name || '???'}</span>
+                </p>
+              );
+            })}
+        </div>
+      )}
+
+      {/* Bloodhound — most isolated player */}
+      {bloodhoundTarget && (
+        <div className="mb-4">
+          <p className="text-[var(--cyan)] text-lg">
+            BLOODHOUND: <span style={{ color: bloodhoundTarget.color }}>{bloodhoundTarget.name}</span>
+            <span className="text-[var(--dim)]"> is alone at {gameState.locations.find(l => l.id === bloodhoundTarget.location)?.name || '???'}</span>
+          </p>
+        </div>
+      )}
 
       {currentPlayer.status === 'alive' ? (
         <>
@@ -819,18 +951,29 @@ export default function Game() {
           {/* Exits */}
           <div className="mb-4">
             <p className="text-lg">EXITS:</p>
-            {currentLocation?.connectedTo.map(locId => {
-              const loc = gameState.locations.find(l => l.id === locId);
-              return (
-                <button
-                  key={locId}
-                  className="term-btn text-lg"
-                  onClick={() => handleMove(locId)}
-                >
-                  {'> '}{loc?.name}
-                </button>
-              );
-            })}
+            {currentLocation?.connectedTo
+              .filter(locId => locId !== 'secret') // Hide secret room from normal exits
+              .map(locId => {
+                const loc = gameState.locations.find(l => l.id === locId);
+                return (
+                  <button
+                    key={locId}
+                    className="term-btn text-lg"
+                    onClick={() => handleMove(locId)}
+                  >
+                    {'> '}{loc?.name}
+                  </button>
+                );
+              })}
+            {/* Secret room exit — only in Music Room after discovery */}
+            {secretRoomFound && currentPlayer.location === 'music' && (
+              <button
+                className="term-btn text-lg text-[var(--cyan)]"
+                onClick={handleEnterSecretRoom}
+              >
+                {'> '}??? Room 404
+              </button>
+            )}
           </div>
 
           {/* Actions */}
