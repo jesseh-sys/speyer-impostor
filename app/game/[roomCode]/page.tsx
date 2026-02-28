@@ -124,8 +124,8 @@ export default function Game() {
         if (victimId && msg.data.players?.[victimId]?.status === 'alive') {
           const victim = msg.data.players[victimId];
           if (victim?.powerup === undefined) {
-            // Kill was silently rejected (cooldown, doors locked, target moved, etc.)
-            setShieldBlockMsg(`${victim?.name || 'Target'} slipped away. Kill failed.`);
+            // Kill was silently rejected (cooldown, target moved, etc.)
+            setShieldBlockMsg(`Kill failed. Try again.`);
           } else {
             setShieldBlockMsg(`Something protected ${victim?.name || 'them'}. Your attack failed.`);
           }
@@ -1220,9 +1220,16 @@ export default function Game() {
         </p>
       )}
       {isDoorsLocked && (
-        <p className="text-[var(--red)] glow-red text-lg mb-2">
-          &#128274; DOORS LOCKED &#128274; — You can't move.
-        </p>
+        <div className="mb-2">
+          <p className="text-[var(--red)] glow-red text-lg">
+            &#128274; DOORS LOCKED &#128274; — You can't move.
+          </p>
+          {othersHere.length > 0 && (
+            <p className="text-[var(--dim)] text-base">
+              Trapped with: {othersHere.map(p => p.name).join(', ')}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Shield block message (impostor only) */}
