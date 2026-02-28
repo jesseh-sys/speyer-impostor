@@ -358,6 +358,8 @@ export default class GameServer implements Party.Server {
 
     if (!killer || killer.role !== 'impostor' || killer.status !== 'alive') return;
     if (!victim || victim.status !== 'alive') return;
+    if (playerId === data.victimId) return; // Can't self-kill
+    if (victim.role === 'impostor') return; // Can't kill co-impostor
 
     // Kill cooldown enforcement
     const now = Date.now();
@@ -432,12 +434,18 @@ export default class GameServer implements Party.Server {
     this.meetingTimers.forEach(t => clearTimeout(t));
     this.meetingTimers = [];
 
-    // Snapshot player locations at meeting start
+    // Snapshot player locations at meeting start (hide secret room)
     this.meetingLocations = {};
     for (const [id, p] of Object.entries(this.gameState.players)) {
       if (p.status === 'alive') {
-        const loc = this.gameState.locations.find(l => l.id === p.location);
-        this.meetingLocations[id] = loc?.name || p.location;
+        if (p.location === 'secret') {
+          // Show the entrance room instead to keep secret room hidden
+          const entrance = this.gameState.locations.find(l => l.id === this.gameState!.secretRoomEntrance);
+          this.meetingLocations[id] = entrance?.name || '???';
+        } else {
+          const loc = this.gameState.locations.find(l => l.id === p.location);
+          this.meetingLocations[id] = loc?.name || p.location;
+        }
       }
     }
 
@@ -584,6 +592,9 @@ export default class GameServer implements Party.Server {
   handleEnterSecretRoom(msg: ClientMessage) {
     if (!this.gameState || this.gameState.phase !== 'playing') return;
 
+    // Can't enter secret room during door lock
+    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) return;
+
     const player = this.gameState.players[msg.playerId];
     if (!player || player.status !== 'alive') return;
 
@@ -608,14 +619,21 @@ export default class GameServer implements Party.Server {
       until: Date.now() + 30000, // 30 seconds
     };
 
-    // Auto-clear powerup after 30s
+    // Auto-clear powerup after expiry (checks timestamp, so meetings extending it still work)
     const pid = msg.playerId;
-    this.ephemeralTimers.push(setTimeout(() => {
-      if (this.gameState?.players[pid]?.powerup) {
-        this.gameState.players[pid].powerup = undefined;
+    const checkPowerupExpiry = () => {
+      const p = this.gameState?.players[pid];
+      if (!p?.powerup) return;
+      const remaining = p.powerup.until - Date.now();
+      if (remaining <= 0) {
+        p.powerup = undefined;
         this.broadcastFiltered();
+      } else {
+        // Re-check after remaining time (handles meeting extensions)
+        this.ephemeralTimers.push(setTimeout(checkPowerupExpiry, remaining + 100));
       }
-    }, 30000));
+    };
+    this.ephemeralTimers.push(setTimeout(checkPowerupExpiry, 30000));
   }
 
   countVotes() {
@@ -949,8 +967,9 @@ export default class GameServer implements Party.Server {
     }
 
     // Strip secret room's connectedTo to prevent anti-cheat leak
+    // But keep it if the player is IN the secret room (so ghosts can leave)
     const filteredLocations = gs.locations.map(l =>
-      l.id === 'secret' ? { ...l, connectedTo: [] } : l
+      l.id === 'secret' ? { ...l, connectedTo: player.location === 'secret' ? l.connectedTo : [] } : l
     );
 
     return {
