@@ -139,6 +139,24 @@ export default class GameServer implements Party.Server {
       console.log('Player reconnected:', playerId);
       // Don't allow appearance changes mid-game
       if (this.gameState.phase === 'lobby') {
+        // Dedup against other players before updating
+        const others = Object.values(this.gameState.players).filter(p => p.id !== playerId);
+        const takenNames = new Set(others.map(p => p.name));
+        if (takenNames.has(playerName)) {
+          let suffix = 2;
+          while (takenNames.has(`${playerName}${suffix}`)) suffix++;
+          playerName = `${playerName}${suffix}`;
+        }
+        const takenIcons = new Set(others.map(p => p.icon));
+        if (takenIcons.has(icon)) {
+          const available = PLAYER_ICONS.find(i => !takenIcons.has(i));
+          if (available) icon = available;
+        }
+        const takenColors = new Set(others.map(p => p.color));
+        if (takenColors.has(color)) {
+          const available = PLAYER_COLORS.find(c => !takenColors.has(c));
+          if (available) color = available;
+        }
         this.gameState.players[playerId].name = playerName;
         this.gameState.players[playerId].icon = icon;
         this.gameState.players[playerId].color = color;
