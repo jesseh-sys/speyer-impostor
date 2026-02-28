@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
-import { GameState, Player } from '@/types/game';
+import { GameState } from '@/types/game';
 import {
   NarrativeTemplate,
   getTravelNarrative,
@@ -27,6 +27,7 @@ interface ActiveNarrative {
 
 export default function Game() {
   const params = useParams();
+  const router = useRouter();
   const roomCode = params.roomCode as string;
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerId, setPlayerId] = useState('');
@@ -59,15 +60,34 @@ export default function Game() {
   const [secretRoomFound, setSecretRoomFound] = useState(false);
   const secretTapRef = useRef({ count: 0, lastTap: 0 });
 
+  // Track pending kill to detect shield block
+  const pendingKillRef = useRef<string | null>(null);
+  const [shieldBlockMsg, setShieldBlockMsg] = useState<string | null>(null);
+
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
 
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
     room: roomCode,
+    onOpen() {
+      // Re-identify on every connection (including reconnects after WiFi drop)
+      const pid = sessionStorage.getItem('playerId');
+      if (pid) {
+        socket.send(JSON.stringify({ type: 'identify', playerId: pid }));
+      }
+    },
     onMessage(event) {
       const msg = JSON.parse(event.data);
       if (msg.type === 'gameState') {
+        // Check if a pending kill was blocked by shield
+        const victimId = pendingKillRef.current;
+        if (victimId && msg.data.players?.[victimId]?.status === 'alive') {
+          const victimName = msg.data.players[victimId]?.name || 'them';
+          setShieldBlockMsg(`Something protected ${victimName}. Your attack failed.`);
+          setTimeout(() => setShieldBlockMsg(null), 3000);
+        }
+        pendingKillRef.current = null;
         setGameState(msg.data);
       }
     },
@@ -140,6 +160,13 @@ export default function Game() {
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
   }, [gameState?.timer?.startTime, gameState?.timer?.duration]);
+
+  // ── Redirect to lobby on restart ─────────────
+  useEffect(() => {
+    if (gameState?.phase === 'lobby') {
+      router.push(`/lobby/${roomCode}`);
+    }
+  }, [gameState?.phase]);
 
   // ── Auto-scroll chat ─────────────────────────
 
@@ -330,6 +357,7 @@ export default function Game() {
       template,
       () => {
         discoveredBodyRef.current = victimId; // Don't trigger discovery for own kill
+        pendingKillRef.current = victimId; // Track to detect shield block
         socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
       },
       () => {}, // choice B: back out, do nothing
@@ -414,22 +442,6 @@ export default function Game() {
   };
 
   const divider = () => <div className="text-[var(--dim)] my-3">{'═'.repeat(30)}</div>;
-
-  const getEjectedPlayer = (): Player | null => {
-    if (!gameState?.votes) return null;
-    const voteCounts: Record<string, number> = {};
-    Object.values(gameState.votes).forEach(votedForId => {
-      voteCounts[votedForId] = (voteCounts[votedForId] || 0) + 1;
-    });
-    let maxVotes = 0;
-    let ejectedId = '';
-    Object.entries(voteCounts).forEach(([id, count]) => {
-      if (id === 'skip') return;
-      if (count > maxVotes) { maxVotes = count; ejectedId = id; }
-    });
-    if (ejectedId && maxVotes >= 2) return gameState.players[ejectedId] || null;
-    return null;
-  };
 
   // ── Loading states ────────────────────────────
 
@@ -542,7 +554,7 @@ export default function Game() {
           {divider()}
           {gameState.winner === 'konami' ? (
             <div>
-              <pre className="text-[var(--red)] glow-red text-sm sm:text-base text-center leading-tight">{`
+              <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
  ██╗  ██╗ ██████╗ ███╗   ██╗ █████╗ ███╗   ███╗██╗
  ██║ ██╔╝██╔═══██╗████╗  ██║██╔══██╗████╗ ████║██║
  █████╔╝ ██║   ██║██╔██╗ ██║███████║██╔████╔██║██║
@@ -561,13 +573,29 @@ export default function Game() {
             </div>
           ) : gameState.winner === 'innocents' ? (
             <div>
-              <p className="text-2xl glow text-center">INNOCENTS WIN</p>
-              <p className="text-[var(--dim)] text-center mt-1">The impostor has been stopped.</p>
+              <pre className="text-[var(--green)] glow text-xs sm:text-sm text-center leading-tight">{`
+ ██╗███╗   ██╗███╗   ██╗ ██████╗  ██████╗███████╗███╗   ██╗████████╗███████╗
+ ██║████╗  ██║████╗  ██║██╔═══██╗██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔════╝
+ ██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║     █████╗  ██╔██╗ ██║   ██║   ███████╗
+ ██║██║╚██╗██║██║╚██╗██║██║   ██║██║     ██╔══╝  ██║╚██╗██║   ██║   ╚════██║
+ ██║██║ ╚████║██║ ╚████║╚██████╔╝╚██████╗███████╗██║ ╚████║   ██║   ███████║
+ ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝
+                        W   I   N`}</pre>
+              <p className="text-[var(--dim)] text-center mt-2">The impostor has been stopped.</p>
+              <p className="text-[var(--dim)] text-center text-sm">The school is safe. For now.</p>
             </div>
           ) : (
             <div>
-              <p className="text-2xl text-[var(--red)] glow-red text-center">IMPOSTORS WIN</p>
-              <p className="text-[var(--dim)] text-center mt-1">The school has fallen.</p>
+              <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
+  ██████╗  █████╗ ███╗   ███╗███████╗
+ ██╔════╝ ██╔══██╗████╗ ████║██╔════╝
+ ██║  ███╗███████║██╔████╔██║█████╗
+ ██║   ██║██╔══██║██║╚██╔╝██║██╔══╝
+ ╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗
+  ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝
+          O   V   E   R`}</pre>
+              <p className="text-[var(--red)] text-center mt-2">The impostors win.</p>
+              <p className="text-[var(--dim)] text-center text-sm">The school has fallen. The halls are empty now.</p>
             </div>
           )}
           {divider()}
@@ -584,9 +612,22 @@ export default function Game() {
             </p>
           ))}
 
-          <div className="mt-8">
-            <button onClick={() => window.location.href = '/'} className="term-btn glow text-xl">
-              [PLAY AGAIN]
+          <div className="mt-8 flex flex-col gap-2">
+            {playerId === gameState.hostId ? (
+              <button
+                onClick={() => {
+                  socket.send(JSON.stringify({ type: 'restartGame', playerId }));
+                  setSecretRoomFound(false);
+                }}
+                className="term-btn glow text-xl"
+              >
+                [PLAY AGAIN — SAME GROUP]
+              </button>
+            ) : (
+              <p className="text-[var(--dim)] text-lg">Waiting for host to restart...</p>
+            )}
+            <button onClick={() => window.location.href = '/'} className="term-btn text-xl text-[var(--dim)]">
+              [NEW ROOM]
             </button>
           </div>
         </div>
@@ -597,30 +638,28 @@ export default function Game() {
   // ── RESULTS ───────────────────────────────────
 
   if (gameState.phase === 'results') {
-    const ejected = getEjectedPlayer();
+    const ejection = gameState.ejectionResult;
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
         {konamiOverlay}
         <div className="mt-8">
           {divider()}
-          <p className="text-xl text-center">VOTE RESULTS</p>
+          <pre className="text-[var(--green)] glow text-center text-xs sm:text-sm leading-tight">{`
+ ╔═══════════════════════════╗
+ ║   V O T E   R E S U L T  ║
+ ╚═══════════════════════════╝`}</pre>
           {divider()}
 
-          {ejected ? (
+          {ejection ? (
             <div className="mt-6 text-center">
-              <p className="text-xl" style={{ color: ejected.color }}>
-                {ejected.name} was ejected.
+              <p className="text-xl" style={{ color: gameState.players[ejection.playerId]?.color }}>
+                {ejection.name} was ejected.
               </p>
               <p className={`text-lg mt-2 ${
-                ejected.role === 'impostor' ? 'text-[var(--red)] glow-red' : 'text-[var(--green)]'
+                ejection.role === 'impostor' ? 'text-[var(--red)] glow-red' : 'text-[var(--green)]'
               }`}>
-                {ejected.name} was {ejected.role === 'impostor' ? 'the IMPOSTOR.' : 'INNOCENT.'}
+                {ejection.name} was {ejection.role === 'impostor' ? 'the IMPOSTOR.' : 'INNOCENT.'}
               </p>
-              {Math.random() < 0.1 && (
-                <p className="text-[var(--dim)] text-sm mt-4 italic">
-                  {ejected.name} has died of dysentery.
-                </p>
-              )}
             </div>
           ) : (
             <p className="text-xl text-center mt-6 text-[var(--dim)]">
@@ -646,7 +685,13 @@ export default function Game() {
         {konamiOverlay}
         <div className="mt-8">
           {divider()}
-          <p className="text-xl text-center">WHO IS THE IMPOSTOR?</p>
+          <pre className="text-[var(--amber)] glow-amber text-xs sm:text-sm text-center leading-tight">{`
+ ██╗   ██╗ ██████╗ ████████╗███████╗
+ ██║   ██║██╔═══██╗╚══██╔══╝██╔════╝
+ ██║   ██║██║   ██║   ██║   █████╗
+ ╚██╗ ██╔╝██║   ██║   ██║   ██╔══╝
+  ╚████╔╝ ╚██████╔╝   ██║   ███████╗
+   ╚═══╝   ╚═════╝    ╚═╝   ╚══════╝`}</pre>
           <p className="text-[var(--amber)] text-center glow-amber">[{formatTime(timeLeft)}]</p>
           {divider()}
 
@@ -693,9 +738,24 @@ export default function Game() {
         {konamiOverlay}
         <div className="mt-8">
           {divider()}
-          <p className="text-xl text-center text-[var(--amber)] glow-amber">
-            {gameState.deadBodies?.some(b => b.reportedBy) ? '!! BODY REPORTED !!' : '!! EMERGENCY MEETING !!'}
-          </p>
+          {gameState.deadBodies?.some(b => b.reportedBy) ? (
+            <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
+ ██████╗  ██████╗ ██████╗ ██╗   ██╗
+ ██╔══██╗██╔═══██╗██╔══██╗╚██╗ ██╔╝
+ ██████╔╝██║   ██║██║  ██║ ╚████╔╝
+ ██╔══██╗██║   ██║██║  ██║  ╚██╔╝
+ ██████╔╝╚██████╔╝██████╔╝   ██║
+ ╚═════╝  ╚═════╝ ╚═════╝    ╚═╝
+    R E P O R T E D`}</pre>
+          ) : (
+            <pre className="text-[var(--amber)] glow-amber text-xs sm:text-sm text-center leading-tight">{`
+ ███╗   ███╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗
+ ████╗ ████║██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝
+ ██╔████╔██║█████╗  █████╗     ██║   ██║██╔██╗ ██║██║  ███╗
+ ██║╚██╔╝██║██╔══╝  ██╔══╝     ██║   ██║██║╚██╗██║██║   ██║
+ ██║ ╚═╝ ██║███████╗███████╗   ██║   ██║██║ ╚████║╚██████╔╝
+ ╚═╝     ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝`}</pre>
+          )}
           <p className="text-[var(--amber)] text-center">[{formatTime(timeLeft)}]</p>
           {divider()}
         </div>
@@ -743,10 +803,9 @@ export default function Game() {
   const othersHere = playersHere.filter(p => p.id !== playerId);
   const isLightsOut = gameState.lightsOut ? Date.now() < gameState.lightsOut.until : false;
 
-  // Shadow Walk: hide shadow-walking impostors from innocent players' "You see:" list
-  const visibleOthers = currentPlayer.role === 'innocent'
-    ? othersHere.filter(p => !(p.powerup?.type === 'shadowWalk' && p.powerup.until > Date.now()))
-    : othersHere;
+  // Shadow Walk is handled server-side — shadow-walking impostors have
+  // their location set to '__shadow__' so they naturally don't appear in othersHere
+  const visibleOthers = othersHere;
 
   const killTargets = currentPlayer.role === 'impostor'
     ? othersHere.filter(p => p.role !== 'impostor')
@@ -773,9 +832,13 @@ export default function Game() {
       <div className="mt-4">
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
         {currentPlayer.role === 'impostor' ? (
-          <p className="text-[var(--red)] glow-red text-xl" onClick={handleRoleTap}>
-            {' '}ROLE: IMPOSTOR
-          </p>
+          <div onClick={handleRoleTap}>
+            <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`  _____
+ /     \\
+| () () |  ROLE: IMPOSTOR
+ \\ ___ /
+  |||||`}</pre>
+          </div>
         ) : (
           <p className="text-xl" onClick={handleRoleTap}>
             {' '}ROLE: INNOCENT {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
@@ -783,8 +846,29 @@ export default function Game() {
         )}
         {currentPlayer.status === 'dead' && (
           <div>
-            <p className="text-[var(--red)] glow-red"> &#9760; YOU ARE DEAD &#9760;</p>
-            <p className="text-[var(--dim)] text-sm"> GAME OVER. INSERT COIN TO CONTINUE.</p>
+            <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`
+  ██████╗ ███████╗ █████╗ ██████╗
+  ██╔══██╗██╔════╝██╔══██╗██╔══██╗
+  ██║  ██║█████╗  ███████║██║  ██║
+  ██║  ██║██╔══╝  ██╔══██║██║  ██║
+  ██████╔╝███████╗██║  ██║██████╔╝
+  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝`}</pre>
+            <p className="text-[var(--dim)] text-sm"> INSERT COIN TO CONTINUE.</p>
+          </div>
+        )}
+        {/* Global task progress bar */}
+        {gameState.taskProgress && (
+          <div className="mt-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[var(--dim)] text-sm">TASKS</span>
+              <div className="flex-1 h-3 border border-[var(--dim)]">
+                <div
+                  className="h-full bg-[var(--green)]"
+                  style={{ width: `${Math.round((gameState.taskProgress.completed / gameState.taskProgress.total) * 100)}%` }}
+                />
+              </div>
+              <span className="text-[var(--dim)] text-sm">{gameState.taskProgress.completed}/{gameState.taskProgress.total}</span>
+            </div>
           </div>
         )}
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
@@ -795,12 +879,12 @@ export default function Game() {
         <h2 className="text-2xl glow">{currentLocation?.name.toUpperCase()}</h2>
         <p
           className="text-[var(--dim)] mt-1 text-lg"
-          onClick={currentPlayer.location === gameState.secretRoomEntrance ? handleSecretTap : undefined}
+          onClick={gameState.atSecretEntrance ? handleSecretTap : undefined}
         >
           {currentLocation?.description}
         </p>
         {/* Subtle hint for the secret room — only in the entrance room */}
-        {currentPlayer.location === gameState.secretRoomEntrance && !secretRoomFound && gameState.secretRoomMethod && (
+        {gameState.atSecretEntrance && !secretRoomFound && gameState.secretRoomMethod && (
           <p className="text-[var(--dim)] text-sm mt-1 opacity-60">
             {gameState.secretRoomMethod === 'piano' && 'Something in the corner catches your eye...'}
             {gameState.secretRoomMethod === 'shelves' && 'A faint hum comes from behind the shelves...'}
@@ -822,9 +906,21 @@ export default function Game() {
           ⚡ LIGHTS OUT ⚡ — You can barely see anything.
         </p>
       )}
+      {gameState.scrambled && Date.now() < gameState.scrambled.until && (
+        <p className="text-[var(--amber)] glow-amber text-lg mb-2">
+          &#9889; SCRAMBLE &#9889; — Everyone has been teleported!
+        </p>
+      )}
       {isDoorsLocked && (
         <p className="text-[var(--red)] glow-red text-lg mb-2">
           &#128274; DOORS LOCKED &#128274; — You can't move.
+        </p>
+      )}
+
+      {/* Shield block message (impostor only) */}
+      {shieldBlockMsg && (
+        <p className="text-[var(--cyan)] glow text-lg mb-2">
+          &#9876; {shieldBlockMsg}
         </p>
       )}
 
@@ -982,7 +1078,7 @@ export default function Game() {
                 );
               })}
             {/* Secret room exit — only in the entrance room after discovery */}
-            {secretRoomFound && currentPlayer.location === gameState.secretRoomEntrance && (
+            {secretRoomFound && gameState.atSecretEntrance && (
               <button
                 className="term-btn text-lg text-[var(--cyan)]"
                 onClick={handleEnterSecretRoom}

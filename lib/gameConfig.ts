@@ -1,6 +1,6 @@
 import { Location, Task } from '@/types/game';
 
-export const PLAYER_ICONS = ['@', '#', '$', '&', '*', '+', '!', '?', '~', '^', '%', '='];
+export const PLAYER_ICONS = ['@', '#', '$', '&', '*', '+', '!', '?', '~', '^', '%', '=', '>', '<', ':'];
 
 export const PLAYER_COLORS = [
   '#00ff41', // Green
@@ -11,6 +11,13 @@ export const PLAYER_COLORS = [
   '#ffffff', // White
   '#ff6600', // Orange
   '#ffff00', // Yellow
+  '#88ff88', // Light green
+  '#ff88cc', // Pink
+  '#88ccff', // Light blue
+  '#cc88ff', // Purple
+  '#ffcc88', // Peach
+  '#88ffcc', // Mint
+  '#ccff88', // Lime
 ];
 
 export const LOCATIONS: Location[] = [
@@ -92,6 +99,7 @@ export const TASKS: Omit<Task, 'id'>[] = [
   { title: 'Water the plant', location: 'suib', description: 'It turns to face you. It was already facing you.', type: 'quick' },
   { title: 'Collect papers', location: 'mj', description: 'The papers are blank. Every single one.', type: 'quick' },
   { title: 'Hang on terrace', location: 'terrace', description: 'Take a breather. The air hums with electricity.', type: 'quick' },
+  { title: 'Pick up litter', location: 'boulevard', description: 'Trash on the ground. None of it is yours. None of it should exist.', type: 'quick' },
 ];
 
 export const SABOTAGES = [
@@ -112,9 +120,9 @@ export const KILL_ANIMATIONS = [
 ];
 
 export const GAME_CONFIG = {
-  MIN_PLAYERS: 3,
+  MIN_PLAYERS: 4,
   MAX_PLAYERS: 15,
-  DISCUSSION_TIME: 45,
+  DISCUSSION_TIME: 30,
   VOTING_TIME: 30,
   GAME_DURATION: 600,
   TASKS_PER_PLAYER: 5,

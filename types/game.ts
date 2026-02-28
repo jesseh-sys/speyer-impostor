@@ -53,6 +53,7 @@ export interface VoteResult {
 export interface GameState {
   roomCode: string;
   phase: GamePhase;
+  hostId?: string;
   players: Record<string, Player>;
   tasks: Task[];
   locations: Location[];
@@ -79,10 +80,16 @@ export interface GameState {
   // Per-player computed fields (set by server for each connection)
   sixthSenseWarning?: boolean;
   bloodhoundTarget?: { name: string; locationName: string; color: string };
+  taskProgress?: { completed: number; total: number }; // Global task bar for innocents
+  atSecretEntrance?: boolean; // Server tells client if they're at the secret entrance
+  ejectionResult?: { playerId: string; role: PlayerRole; name: string } | null; // Set during results phase
+  scrambled?: { until: number }; // Brief flash when scramble happens
 }
 
+export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame';
+
 export interface ClientMessage {
-  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage' | 'enterSecretRoom' | 'identify';
+  type: ClientMessageType;
   playerId: string;
   data?: any;
 }

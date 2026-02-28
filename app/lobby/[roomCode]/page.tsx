@@ -21,7 +21,7 @@ export default function Lobby() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'gameState') {
         setGameState(msg.data);
-        if (msg.data.phase === 'playing') {
+        if (msg.data.phase !== 'lobby') {
           router.push(`/game/${roomCode}`);
         }
       }
@@ -116,7 +116,10 @@ export default function Lobby() {
             <span style={{ color: player.color }}>
               {player.name} ({player.icon})
             </span>
-            {player.id === playerId && (
+            {player.id === gameState.hostId && (
+              <span className="text-[var(--cyan)]"> [HOST]</span>
+            )}
+            {player.id === playerId && player.id !== gameState.hostId && (
               <span className="text-[var(--amber)]"> {'<-- YOU'}</span>
             )}
           </p>
@@ -134,10 +137,14 @@ export default function Lobby() {
           <p className="text-[var(--amber)] glow-amber text-lg">
             NEED {needed} MORE PLAYER{needed === 1 ? '' : 'S'} TO START
           </p>
-        ) : (
+        ) : playerId === gameState.hostId ? (
           <button onClick={handleStartGame} className="term-btn glow text-xl">
             [START GAME]
           </button>
+        ) : (
+          <p className="text-[var(--dim)] text-lg">
+            Waiting for host to start...
+          </p>
         )}
       </div>
 
