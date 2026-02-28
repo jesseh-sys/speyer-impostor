@@ -49,6 +49,10 @@ export default function Game() {
   const konamiRef = useRef<string[]>([]);
   const tapCountRef = useRef({ count: 0, lastTap: 0 });
 
+  // Grue tracking
+  const [grueWarning, setGrueWarning] = useState(0); // 0=none, 1=dark, 2=grue
+  const grueTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
     room: roomCode,
@@ -156,6 +160,46 @@ export default function Game() {
   useEffect(() => {
     setFlavorLines([]);
   }, [gameState?.players?.[playerId]?.location]);
+
+  // ── Grue mechanic ──────────────────────────
+  // Stay in one room 60s+: warnings then forced teleport
+
+  useEffect(() => {
+    if (gameState?.phase !== 'playing') return;
+    const player = gameState?.players?.[playerId];
+    if (!player || player.status === 'dead') return;
+    const loc = gameState?.locations.find(l => l.id === player.location);
+
+    // Reset grue on location change
+    setGrueWarning(0);
+    if (grueTimerRef.current) clearTimeout(grueTimerRef.current);
+
+    // 40s: first warning
+    const t1 = setTimeout(() => {
+      setGrueWarning(1);
+      setFlavorLines(prev => [...prev.slice(-1), 'It is getting dark...']);
+    }, 40000);
+
+    // 55s: second warning
+    const t2 = setTimeout(() => {
+      setGrueWarning(2);
+      setFlavorLines(prev => [...prev.slice(-1), 'You are likely to be eaten by a grue.']);
+    }, 55000);
+
+    // 65s: grue strikes — teleport to random connected room
+    const t3 = setTimeout(() => {
+      if (!loc?.connectedTo.length) return;
+      const randomExit = loc.connectedTo[
+        Math.floor(Math.random() * loc.connectedTo.length)
+      ];
+      setGrueWarning(0);
+      setFlavorLines(['A grue has found you! You flee in terror.']);
+      socket.send(JSON.stringify({ type: 'move', playerId, data: { location: randomExit } }));
+    }, 65000);
+
+    grueTimerRef.current = t3;
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [gameState?.phase, gameState?.players?.[playerId]?.location, gameState?.players?.[playerId]?.status]);
 
   // ── Derived values (needed by effects below) ──
   const currentPlayer = gameState ? gameState.players[playerId] : null;
@@ -301,8 +345,11 @@ export default function Game() {
 
     // Secret command — classic text adventure cheat from Colossal Cave (1976)
     if (chatMessage.trim().toLowerCase() === 'xyzzy') {
+      // Send the hollow voice message so everyone sees it
+      socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: "xyzzy" } }));
       setChatMessage('');
-      setShowKonamiConfirm(true);
+      // Small delay so they see the message before the confirm
+      setTimeout(() => setShowKonamiConfirm(true), 800);
       return;
     }
 
@@ -516,6 +563,11 @@ export default function Game() {
               }`}>
                 {ejected.name} was {ejected.role === 'impostor' ? 'the IMPOSTOR.' : 'INNOCENT.'}
               </p>
+              {Math.random() < 0.1 && (
+                <p className="text-[var(--dim)] text-sm mt-4 italic">
+                  {ejected.name} has died of dysentery.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-xl text-center mt-6 text-[var(--dim)]">
@@ -636,6 +688,7 @@ export default function Game() {
   // ── MAIN PLAYING PHASE ────────────────────────
 
   const othersHere = playersHere.filter(p => p.id !== playerId);
+  const isLightsOut = gameState.lightsOut ? Date.now() < gameState.lightsOut.until : false;
   const killTargets = currentPlayer.role === 'impostor'
     ? othersHere.filter(p => p.role !== 'impostor')
     : [];
@@ -656,7 +709,10 @@ export default function Game() {
           </p>
         )}
         {currentPlayer.status === 'dead' && (
-          <p className="text-[var(--red)] glow-red"> &#9760; YOU ARE DEAD &#9760;</p>
+          <div>
+            <p className="text-[var(--red)] glow-red"> &#9760; YOU ARE DEAD &#9760;</p>
+            <p className="text-[var(--dim)] text-sm"> GAME OVER. INSERT COIN TO CONTINUE.</p>
+          </div>
         )}
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
       </div>
@@ -667,20 +723,35 @@ export default function Game() {
         <p className="text-[var(--dim)] mt-1 text-lg">{currentLocation?.description}</p>
       </div>
 
+      {/* Lights out banner */}
+      {isLightsOut && (
+        <p className="text-[var(--amber)] glow-amber text-lg mb-2">
+          ⚡ LIGHTS OUT ⚡ — You can barely see anything.
+        </p>
+      )}
+
       {/* Players here */}
       <div className="mb-4">
         {othersHere.length > 0 ? (
           <p className="text-lg">
             <span className="text-[var(--dim)]">You see: </span>
-            {othersHere.map((p, i) => (
-              <span key={p.id}>
-                {i > 0 && ', '}
-                <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
+            {isLightsOut && currentPlayer.role !== 'impostor' ? (
+              <span className="text-[var(--dim)]">
+                {othersHere.map((_, i) => (i > 0 ? ', ' : '') + '???').join('')}
               </span>
-            ))}
+            ) : (
+              othersHere.map((p, i) => (
+                <span key={p.id}>
+                  {i > 0 && ', '}
+                  <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
+                </span>
+              ))
+            )}
           </p>
         ) : (
-          <p className="text-[var(--dim)] text-lg">You are alone here.</p>
+          <p className="text-[var(--dim)] text-lg">
+            {isLightsOut ? "You can't tell if you're alone." : "You are alone here."}
+          </p>
         )}
       </div>
 
@@ -690,7 +761,9 @@ export default function Game() {
           {gameState.deadBody && currentPlayer.location === gameState.deadBody.location && (
             <div className="mb-4">
               <p className="text-[var(--red)] glow-red text-lg">
-                {gameState.players[gameState.deadBody.playerId]?.name || 'Someone'} lies motionless on the ground.
+                {isLightsOut && currentPlayer.role !== 'impostor'
+                  ? 'You trip over something. A body.'
+                  : `${gameState.players[gameState.deadBody.playerId]?.name || 'Someone'} lies motionless on the ground.`}
               </p>
               <button className="term-btn term-btn-red text-lg" onClick={handleReportBody}>
                 {'> '}Report body
@@ -712,6 +785,18 @@ export default function Game() {
                   <span style={{ color: p.color }}>{p.name}</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Sabotage (impostor) */}
+          {currentPlayer.role === 'impostor' && !isLightsOut && (
+            <div className="mb-4">
+              <button
+                className="term-btn term-btn-amber text-lg"
+                onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'lightsOut' } }))}
+              >
+                {'> '}Kill the lights
+              </button>
             </div>
           )}
 
@@ -765,9 +850,12 @@ export default function Game() {
       {/* Idle flavor text */}
       {flavorLines.length > 0 && (
         <div className="mt-4">
-          {flavorLines.map((line, i) => (
-            <p key={i} className="text-[var(--dim)] text-base italic">{line}</p>
-          ))}
+          {flavorLines.map((line, i) => {
+            const isGrue = line.includes('grue') || line.includes('getting dark') || line.includes('flee in terror');
+            return (
+              <p key={i} className={`text-base italic ${isGrue ? 'text-[var(--amber)] glow-amber' : 'text-[var(--dim)]'}`}>{line}</p>
+            );
+          })}
         </div>
       )}
 

@@ -69,6 +69,9 @@ export default class GameServer implements Party.Server {
       case 'konamiKill':
         this.handleKonamiKill();
         break;
+      case 'sabotage':
+        this.handleSabotage(msg);
+        break;
     }
 
     this.broadcast();
@@ -310,6 +313,30 @@ export default class GameServer implements Party.Server {
     this.gameState.phase = 'gameOver';
     this.gameState.winner = 'konami';
     this.broadcast();
+  }
+
+  handleSabotage(msg: ClientMessage) {
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+
+    const player = this.gameState.players[msg.playerId];
+    if (!player || player.role !== 'impostor') return;
+
+    if (msg.data?.type === 'lightsOut') {
+      // Can't stack lights out
+      if (this.gameState.lightsOut && this.gameState.lightsOut.until > Date.now()) return;
+
+      this.gameState.lightsOut = {
+        until: Date.now() + 30000, // 30 seconds
+      };
+
+      // Auto-clear after 30s
+      setTimeout(() => {
+        if (this.gameState) {
+          this.gameState.lightsOut = undefined;
+          this.broadcast();
+        }
+      }, 30000);
+    }
   }
 
   countVotes() {

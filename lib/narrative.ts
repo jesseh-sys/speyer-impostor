@@ -492,6 +492,15 @@ const EASTER_EGG_IDLE = [
   "Your phone autocorrects 'help' to 'skibidi.' Three times.",
   "You hear faint music. 'Never gonna give you up...' It's coming from inside the walls.",
   "Someone stands perfectly still in the corner. Total NPC behavior.",
+  // 80s gaming references
+  "You are standing in an open field west of a white house, with a boarded front door.",
+  "The smart board displays: 'SHALL WE PLAY A GAME?' Then goes dark.",
+  "A strange game. The only winning move is not to play.",
+  "SAVING GAME... SAVE FAILED. THIS IS REAL.",
+  "The screen flickers: 'GAME OVER. INSERT COIN TO CONTINUE.' You have no coins.",
+  "Wouldn't you prefer a nice game of chess?",
+  "The vending machine prints a receipt: 'You have died of dysentery.' What?",
+  "A hollow voice says, 'Fool!'",
 ];
 
 const EASTER_EGG_TRAVEL: NarrativeTemplate[] = [

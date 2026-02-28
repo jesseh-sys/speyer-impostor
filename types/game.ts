@@ -62,10 +62,13 @@ export interface GameState {
     startTime: number;
   };
   winner?: 'innocents' | 'impostors' | 'konami';
+  lightsOut?: {
+    until: number; // timestamp when lights come back
+  };
 }
 
 export interface ClientMessage {
-  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill';
+  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage';
   playerId: string;
   data?: any;
 }
