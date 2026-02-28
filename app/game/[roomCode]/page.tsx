@@ -44,9 +44,10 @@ export default function Game() {
   // Body discovery tracking
   const discoveredBodyRef = useRef<string | null>(null);
 
-  // Konami code
+  // Konami code (keyboard) + secret tap (mobile)
   const [showKonamiConfirm, setShowKonamiConfirm] = useState(false);
   const konamiRef = useRef<string[]>([]);
+  const tapCountRef = useRef({ count: 0, lastTap: 0 });
 
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
@@ -65,7 +66,7 @@ export default function Game() {
   }, []);
 
   // ── Konami code detection ─────────────────────
-  // Keyboard: ↑↑↓↓←→←→BA  |  Mobile: swipe same pattern then double-tap
+  // Keyboard: ↑↑↓↓←→←→BA  |  Mobile: tap ROLE header 10x fast
 
   useEffect(() => {
     const KONAMI = ['up','up','down','down','left','right','left','right','b','a'];
@@ -81,7 +82,6 @@ export default function Game() {
       }
     };
 
-    // Keyboard
     const onKey = (e: KeyboardEvent) => {
       const map: Record<string, string> = {
         ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
@@ -91,39 +91,21 @@ export default function Game() {
       if (seq.length > 20) seq.splice(0, seq.length - 20);
     };
 
-    // Mobile swipes + taps
-    let touchStartX = 0, touchStartY = 0;
-    const onTouchStart = (e: TouchEvent) => {
-      touchStartX = e.touches[0].clientX;
-      touchStartY = e.touches[0].clientY;
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - touchStartX;
-      const dy = e.changedTouches[0].clientY - touchStartY;
-      const absDx = Math.abs(dx), absDy = Math.abs(dy);
-
-      if (absDx < 20 && absDy < 20) {
-        // Tap — counts as 'b' first, then 'a' on next tap
-        const last = seq[seq.length - 1];
-        if (last === 'right' || last === 'b') seq.push(last === 'b' ? 'a' : 'b');
-        else seq.push('b');
-      } else if (absDy > absDx) {
-        seq.push(dy < 0 ? 'up' : 'down');
-      } else {
-        seq.push(dx > 0 ? 'right' : 'left');
-      }
-      checkKonami();
-      if (seq.length > 20) seq.splice(0, seq.length - 20);
-    };
-
     window.addEventListener('keydown', onKey);
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchend', onTouchEnd, { passive: true });
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchend', onTouchEnd);
-    };
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Mobile: tap the role header 10 times within 4 seconds
+  const handleRoleTap = useCallback(() => {
+    const now = Date.now();
+    const ref = tapCountRef.current;
+    if (now - ref.lastTap > 4000) ref.count = 0; // reset if too slow
+    ref.count++;
+    ref.lastTap = now;
+    if (ref.count >= 10) {
+      ref.count = 0;
+      setShowKonamiConfirm(true);
+    }
   }, []);
 
   // ── Timer countdown ──────────────────────────
@@ -657,11 +639,11 @@ export default function Game() {
       <div className="mt-4">
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
         {currentPlayer.role === 'impostor' ? (
-          <p className="text-[var(--red)] glow-red text-xl">
+          <p className="text-[var(--red)] glow-red text-xl" onClick={handleRoleTap}>
             {' '}ROLE: IMPOSTOR
           </p>
         ) : (
-          <p className="text-xl">
+          <p className="text-xl" onClick={handleRoleTap}>
             {' '}ROLE: INNOCENT {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
           </p>
         )}
