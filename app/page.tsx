@@ -73,17 +73,17 @@ export default function Home() {
       {bootComplete && (
         <div>
           {/* Title */}
-          <pre className="text-[var(--green)] glow text-xs sm:text-sm leading-tight mb-1">{`
+          <pre className="text-[var(--green)] glow leading-tight mb-1">{`
  ███████╗██████╗ ███████╗██╗   ██╗███████╗██████╗
  ██╔════╝██╔══██╗██╔════╝╚██╗ ██╔╝██╔════╝██╔══██╗
  ███████╗██████╔╝█████╗   ╚████╔╝ █████╗  ██████╔╝
  ╚════██║██╔═══╝ ██╔══╝    ╚██╔╝  ██╔══╝  ██╔══██╗
  ███████║██║     ███████╗   ██║   ███████╗██║  ██║
  ╚══════╝╚═╝     ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
-          ╔════════════════════╗
-          ║  Z  O  R  K  ™    ║
-          ╚════════════════════╝`}</pre>
-          <p className="text-[var(--dim)] text-xs mb-1">v1.0 &copy; 1986 SPEYER INTERACTIVE</p>
+      ╔══════════════════════════╗
+      ║  A F T E R   H O U R S  ║
+      ╚══════════════════════════╝`}</pre>
+          <p className="text-[var(--dim)] text-sm mb-1">v1.0 &copy; 2025 SPEYER INTERACTIVE</p>
           <p className="text-[var(--dim)] mb-6">You are in a school. It is dark. Trust no one.</p>
 
           {/* Name input */}
@@ -183,7 +183,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mt-10 text-sm text-[var(--dim)]">
+          <div className="mt-10 text-base text-[var(--dim)]">
             <p>4-15 PLAYERS / 10 MINUTE ROUNDS</p>
             <p>TRUST NO ONE.</p>
           </div>

@@ -570,7 +570,7 @@ export default function Game() {
       <div className="max-w-sm w-full text-center">
         {currentPlayer.role === 'impostor' ? (
           <>
-            <pre className="text-[var(--red)] glow-red text-xs sm:text-sm leading-tight">{`
+            <pre className="text-[var(--red)] glow-red leading-tight">{`
   _____
  /     \\
 | () () |
@@ -584,7 +584,7 @@ export default function Game() {
           </>
         ) : (
           <>
-            <pre className="text-[var(--green)] glow text-xs sm:text-sm leading-tight">{`
+            <pre className="text-[var(--green)] glow leading-tight">{`
    ___
   /   \\
  | o o |
@@ -653,7 +653,7 @@ export default function Game() {
 
           {/* Skip hint */}
           {revealedLines < narrative.lines.length && (
-            <p className="text-[var(--dim)] text-xs mt-8 opacity-40 text-center">tap to skip</p>
+            <p className="text-[var(--dim)] text-sm mt-8 text-center">tap to skip</p>
           )}
         </div>
       </div>
@@ -671,7 +671,7 @@ export default function Game() {
           {divider()}
           {gameState.winner === 'innocents' ? (
             <div>
-              <pre className="text-[var(--green)] glow text-xs sm:text-sm text-center leading-tight">{`
+              <pre className="text-[var(--green)] glow text-center leading-tight">{`
  ██╗███╗   ██╗███╗   ██╗ ██████╗  ██████╗███████╗███╗   ██╗████████╗███████╗
  ██║████╗  ██║████╗  ██║██╔═══██╗██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔════╝
  ██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║     █████╗  ██╔██╗ ██║   ██║   ███████╗
@@ -684,7 +684,7 @@ export default function Game() {
             </div>
           ) : (
             <div>
-              <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
+              <pre className="text-[var(--red)] glow-red text-center leading-tight">{`
   ██████╗  █████╗ ███╗   ███╗███████╗
  ██╔════╝ ██╔══██╗████╗ ████║██╔════╝
  ██║  ███╗███████║██╔████╔██║█████╗
@@ -753,7 +753,7 @@ export default function Game() {
             <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
-          <pre className="text-[var(--green)] glow text-center text-xs sm:text-sm leading-tight">{`
+          <pre className="text-[var(--green)] glow text-center leading-tight">{`
  ╔═══════════════════════════╗
  ║   V O T E   R E S U L T  ║
  ╚═══════════════════════════╝`}</pre>
@@ -779,7 +779,7 @@ export default function Game() {
           {/* Vote breakdown */}
           {Object.keys(voteBreakdown).length > 0 && (
             <div className="mt-6">
-              <p className="text-[var(--dim)] text-sm mb-2">VOTE BREAKDOWN:</p>
+              <p className="text-[var(--dim)] text-base mb-2">VOTE BREAKDOWN:</p>
               {Object.entries(voteBreakdown).map(([targetId, voters]) => {
                 const targetName = targetId === 'skip' ? 'SKIP' : (gameState.players[targetId]?.name || '???');
                 const targetColor = targetId === 'skip' ? 'var(--amber)' : (gameState.players[targetId]?.color || 'var(--green)');
@@ -817,7 +817,7 @@ export default function Game() {
             <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
-          <pre className="text-[var(--amber)] glow-amber text-xs sm:text-sm text-center leading-tight">{`
+          <pre className="text-[var(--amber)] glow-amber text-center leading-tight">{`
  ██╗   ██╗ ██████╗ ████████╗███████╗
  ██║   ██║██╔═══██╗╚══██╔══╝██╔════╝
  ██║   ██║██║   ██║   ██║   █████╗
@@ -826,7 +826,7 @@ export default function Game() {
    ╚═══╝   ╚═════╝    ╚═╝   ╚══════╝`}</pre>
           <p className="text-[var(--amber)] text-center glow-amber">[{formatTime(timeLeft)}]</p>
           {/* Vote progress */}
-          <p className="text-[var(--dim)] text-center text-sm">Votes: {votesCast}/{totalVoters}</p>
+          <p className="text-[var(--dim)] text-center text-base">Votes: {votesCast}/{totalVoters}</p>
           {divider()}
 
           {currentPlayer.status === 'dead' ? (
@@ -882,7 +882,7 @@ export default function Game() {
               {['Who?', 'Self-report?', 'Skip vote', 'They\'re sus'].map(phrase => (
                 <button
                   key={phrase}
-                  className="text-xs px-2 py-1 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
+                  className="text-sm px-3 py-1.5 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
                   onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
                 >
                   {phrase}
@@ -919,7 +919,7 @@ export default function Game() {
           )}
           {divider()}
           {gameState.deadBodies?.some(b => b.reportedBy) ? (
-            <pre className="text-[var(--red)] glow-red text-xs sm:text-sm text-center leading-tight">{`
+            <pre className="text-[var(--red)] glow-red text-center leading-tight">{`
  ██████╗  ██████╗ ██████╗ ██╗   ██╗
  ██╔══██╗██╔═══██╗██╔══██╗╚██╗ ██╔╝
  ██████╔╝██║   ██║██║  ██║ ╚████╔╝
@@ -928,7 +928,7 @@ export default function Game() {
  ╚═════╝  ╚═════╝ ╚═════╝    ╚═╝
     R E P O R T E D`}</pre>
           ) : (
-            <pre className="text-[var(--amber)] glow-amber text-xs sm:text-sm text-center leading-tight">{`
+            <pre className="text-[var(--amber)] glow-amber text-center leading-tight">{`
  ███╗   ███╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗
  ████╗ ████║██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝
  ██╔████╔██║█████╗  █████╗     ██║   ██║██╔██╗ ██║██║  ███╗
@@ -940,7 +940,7 @@ export default function Game() {
 
           {/* Body report info */}
           {gameState.reportedBody && (
-            <p className="text-[var(--red)] text-center text-sm mt-1">
+            <p className="text-[var(--red)] text-center text-base mt-1">
               {gameState.reportedBody.reportedBy} found {gameState.reportedBody.name} dead at {gameState.reportedBody.location}
             </p>
           )}
@@ -949,12 +949,12 @@ export default function Game() {
           {/* Player locations at meeting start */}
           {gameState.meetingLocations && Object.keys(gameState.meetingLocations).length > 0 && (
             <div className="mb-3">
-              <p className="text-[var(--dim)] text-sm mb-1">LOCATIONS WHEN CALLED:</p>
+              <p className="text-[var(--dim)] text-base mb-1">LOCATIONS WHEN CALLED:</p>
               {Object.entries(gameState.meetingLocations).map(([pid, locName]) => {
                 const p = gameState.players[pid];
                 if (!p) return null;
                 return (
-                  <p key={pid} className="text-sm ml-2">
+                  <p key={pid} className="text-base ml-2">
                     <span style={{ color: p.color }}>{p.name}</span>
                     <span className="text-[var(--dim)]"> — {locName}</span>
                   </p>
@@ -989,7 +989,7 @@ export default function Game() {
               {['I saw a body', 'I was doing tasks', 'They\'re sus', 'Who?', 'Self-report?', 'Where was everyone?', 'I was with them', 'I\'m innocent'].map(phrase => (
                 <button
                   key={phrase}
-                  className="text-xs px-2 py-1 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
+                  className="text-sm px-3 py-1.5 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
                   onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
                 >
                   {phrase}
@@ -1062,7 +1062,7 @@ export default function Game() {
           <div className="flex-1">
             {isImpostor ? (
               <div>
-                <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`  _____
+                <pre className="text-[var(--red)] glow-red leading-tight">{`  _____
  /     \\
 | () () |  ROLE: IMPOSTOR
  \\ ___ /
@@ -1083,28 +1083,28 @@ export default function Game() {
         </div>
         {currentPlayer.status === 'dead' && (
           <div>
-            <pre className="text-[var(--red)] glow-red text-xs leading-tight">{`
+            <pre className="text-[var(--red)] glow-red leading-tight">{`
   ██████╗ ███████╗ █████╗ ██████╗
   ██╔══██╗██╔════╝██╔══██╗██╔══██╗
   ██║  ██║█████╗  ███████║██║  ██║
   ██║  ██║██╔══╝  ██╔══██║██║  ██║
   ██████╔╝███████╗██║  ██║██████╔╝
   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝`}</pre>
-            <p className="text-[var(--dim)] text-sm"> GHOST MODE — You drift unseen.</p>
+            <p className="text-[var(--dim)] text-base"> GHOST MODE — You drift unseen.</p>
           </div>
         )}
         {/* Global task progress bar */}
         {gameState.taskProgress && (
           <div className="mt-1">
             <div className="flex items-center gap-2">
-              <span className="text-[var(--dim)] text-sm">TASKS</span>
-              <div className="flex-1 h-3 border border-[var(--dim)]">
+              <span className="text-[var(--dim)] text-base">TASKS</span>
+              <div className="flex-1 h-4 border border-[var(--dim)]">
                 <div
                   className="h-full bg-[var(--green)]"
                   style={{ width: `${Math.round((gameState.taskProgress.completed / gameState.taskProgress.total) * 100)}%` }}
                 />
               </div>
-              <span className="text-[var(--dim)] text-sm">{gameState.taskProgress.completed}/{gameState.taskProgress.total}</span>
+              <span className="text-[var(--dim)] text-base">{gameState.taskProgress.completed}/{gameState.taskProgress.total}</span>
             </div>
           </div>
         )}
@@ -1125,7 +1125,7 @@ export default function Game() {
           const gameElapsed = gameState.timer ? (Date.now() - gameState.timer.startTime) / 1000 : 0;
           const isUrgent = gameElapsed > 120;
           return (
-            <p className={`text-[var(--cyan)] mt-1 ${isUrgent ? 'text-base glow' : 'text-sm opacity-80'}`}>
+            <p className={`text-[var(--cyan)] mt-1 ${isUrgent ? 'text-lg glow' : 'text-base'}`}>
               {gameState.secretRoomMethod === 'piano' && (isUrgent
                 ? 'A hidden panel glows near the piano. TAP THE DESCRIPTION ABOVE.'
                 : 'Something in the corner catches your eye... (tap the description)')}
@@ -1141,11 +1141,11 @@ export default function Game() {
       </div>
 
       {/* Mini-map toggle */}
-      <button onClick={() => setShowMap(!showMap)} className="text-[var(--dim)] text-sm mb-2 bg-transparent border-none cursor-pointer">
+      <button onClick={() => setShowMap(!showMap)} className="text-[var(--dim)] text-base mb-2 bg-transparent border-none cursor-pointer">
         [{showMap ? '-' : '+'}] MAP
       </button>
       {showMap && (
-        <div className="mb-4 font-mono text-sm leading-relaxed">
+        <div className="mb-4 font-mono text-base leading-relaxed">
           {MAP_ROWS.map((row, ri) => (
             <div key={ri} className="flex">
               {row.map((cell, ci) => {
@@ -1171,7 +1171,7 @@ export default function Game() {
       {/* Persistent task list */}
       {currentPlayer.role === 'innocent' && allMyTasks.length > 0 && (
         <div className="mb-4">
-          <p className="text-[var(--dim)] text-sm mb-1">YOUR TASKS:</p>
+          <p className="text-[var(--dim)] text-base mb-1">YOUR TASKS:</p>
           {allMyTasks.map(task => {
             const loc = gameState.locations.find(l => l.id === task.location);
             const isHere = task.location === currentPlayer.location;
@@ -1180,7 +1180,7 @@ export default function Game() {
               : null;
             const nextLoc = nav ? gameState.locations.find(l => l.id === nav.nextRoom) : null;
             return (
-              <p key={task.id} className={`text-sm ml-2 ${isHere ? 'text-[var(--green)]' : 'text-[var(--dim)]'}`}>
+              <p key={task.id} className={`text-base ml-2 ${isHere ? 'text-[var(--green)]' : 'text-[var(--dim)]'}`}>
                 {isHere ? '>' : ' '} {task.title} — {loc?.name || '???'}
                 {isHere && ' [HERE]'}
                 {!isHere && nav && (

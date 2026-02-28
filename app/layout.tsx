@@ -5,12 +5,12 @@ import "./globals.css";
 const vt323 = VT323({ weight: "400", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "SPEYERZORK",
+  title: "SPEYER AFTER HOURS",
   description: "A text-adventure social deduction game",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "SPEYERZORK",
+    title: "AFTER HOURS",
   },
 };
 
