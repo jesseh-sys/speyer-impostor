@@ -78,6 +78,13 @@ export default function Game() {
     if (persistentId) setPlayerId(persistentId);
   }, []);
 
+  // Identify ourselves to the server for per-player filtered state
+  useEffect(() => {
+    if (playerId) {
+      socket.send(JSON.stringify({ type: 'identify', playerId }));
+    }
+  }, [playerId]);
+
   // ── Konami code detection ─────────────────────
   // Keyboard: ↑↑↓↓←→←→BA  |  Mobile: tap ROLE header 10x fast
 
@@ -745,34 +752,19 @@ export default function Game() {
     ? othersHere.filter(p => p.role !== 'impostor')
     : [];
 
-  // Sixth Sense: warn innocents when an impostor is in their room
-  const hasSixthSense = currentPlayer.powerup?.type === 'sixthSense' && currentPlayer.powerup.until > Date.now();
-  const impostorNearby = hasSixthSense && othersHere.some(p => p.role === 'impostor');
+  // Sixth Sense: computed server-side, sent as gameState.sixthSenseWarning
+  const impostorNearby = !!gameState.sixthSenseWarning;
 
   // Radar (innocent) or Tracker (impostor): see all player locations
   const hasLocationPower = currentPlayer.powerup &&
     (currentPlayer.powerup.type === 'radar' || currentPlayer.powerup.type === 'tracker') &&
     currentPlayer.powerup.until > Date.now();
 
-  // Bloodhound: find most isolated player
-  const bloodhoundTarget = (() => {
-    if (currentPlayer.powerup?.type !== 'bloodhound' || !currentPlayer.powerup || currentPlayer.powerup.until <= Date.now()) return null;
-    const alivePlayers = Object.values(gameState.players).filter(
-      p => p.status === 'alive' && p.id !== playerId && p.role !== 'impostor'
-    );
-    if (alivePlayers.length === 0) return null;
-    // Find the player who is most alone (fewest other alive players in their room)
-    let mostIsolated = alivePlayers[0];
-    let leastCompany = Infinity;
-    for (const p of alivePlayers) {
-      const company = alivePlayers.filter(o => o.location === p.location && o.id !== p.id).length;
-      if (company < leastCompany) {
-        leastCompany = company;
-        mostIsolated = p;
-      }
-    }
-    return mostIsolated;
-  })();
+  // Bloodhound: computed server-side, sent as gameState.bloodhoundTarget
+  const bloodhoundTarget = gameState.bloodhoundTarget || null;
+
+  // Doors locked
+  const isDoorsLocked = gameState.doorsLocked ? Date.now() < gameState.doorsLocked.until : false;
 
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto pb-16">
@@ -824,10 +816,15 @@ export default function Game() {
         </p>
       )}
 
-      {/* Lights out banner */}
+      {/* Sabotage banners */}
       {isLightsOut && (
         <p className="text-[var(--amber)] glow-amber text-lg mb-2">
           ⚡ LIGHTS OUT ⚡ — You can barely see anything.
+        </p>
+      )}
+      {isDoorsLocked && (
+        <p className="text-[var(--red)] glow-red text-lg mb-2">
+          &#128274; DOORS LOCKED &#128274; — You can't move.
         </p>
       )}
 
@@ -881,12 +878,12 @@ export default function Game() {
         </div>
       )}
 
-      {/* Bloodhound — most isolated player */}
+      {/* Bloodhound — most isolated player (computed server-side) */}
       {bloodhoundTarget && (
         <div className="mb-4">
           <p className="text-[var(--cyan)] text-lg">
             BLOODHOUND: <span style={{ color: bloodhoundTarget.color }}>{bloodhoundTarget.name}</span>
-            <span className="text-[var(--dim)]"> is alone at {gameState.locations.find(l => l.id === bloodhoundTarget.location)?.name || '???'}</span>
+            <span className="text-[var(--dim)]"> is alone at {bloodhoundTarget.locationName}</span>
           </p>
         </div>
       )}
@@ -927,13 +924,26 @@ export default function Game() {
           )}
 
           {/* Sabotage (impostor) */}
-          {currentPlayer.role === 'impostor' && !isLightsOut && (
+          {currentPlayer.role === 'impostor' && !isLightsOut && !isDoorsLocked && (
             <div className="mb-4">
+              <p className="text-[var(--red)] text-lg">SABOTAGE:</p>
               <button
                 className="term-btn term-btn-amber text-lg"
                 onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'lightsOut' } }))}
               >
                 {'> '}Kill the lights
+              </button>
+              <button
+                className="term-btn term-btn-amber text-lg"
+                onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked' } }))}
+              >
+                {'> '}Lock the doors
+              </button>
+              <button
+                className="term-btn term-btn-amber text-lg"
+                onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }))}
+              >
+                {'> '}Scramble everyone
               </button>
             </div>
           )}

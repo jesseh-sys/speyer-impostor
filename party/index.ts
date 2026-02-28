@@ -8,8 +8,10 @@ export default class GameServer implements Party.Server {
   // Server-side state (not broadcast to clients)
   private lastKillTimes: Record<string, number> = {};
   private lastMeetingTime: number = 0;
+  private lastSabotageTime: number = 0;
   private gameTimerHandle: ReturnType<typeof setTimeout> | null = null;
   private meetingTimers: ReturnType<typeof setTimeout>[] = [];
+  private connectionToPlayer: Map<string, string> = new Map();
 
   constructor(readonly room: Party.Room) {}
 
@@ -31,17 +33,26 @@ export default class GameServer implements Party.Server {
       };
     }
 
-    // Send current game state to the newly connected player
-    console.log('Sending game state to player:', conn.id);
-    conn.send(JSON.stringify({ type: 'gameState', data: this.gameState }));
+    // Send safe initial state (roles masked) — proper filtered state sent after 'identify'
+    console.log('Sending initial state to connection:', conn.id);
+    const safeState = this.maskRoles(this.gameState);
+    conn.send(JSON.stringify({ type: 'gameState', data: safeState }));
   }
 
   onMessage(message: string, sender: Party.Connection) {
-    console.log('Received message from', sender.id, ':', message);
     const msg: ClientMessage = JSON.parse(message);
 
-    if (!this.gameState) {
-      console.log('No game state, ignoring message');
+    if (!this.gameState) return;
+
+    // Track connection-to-player mapping
+    if (msg.playerId) {
+      this.connectionToPlayer.set(sender.id, msg.playerId);
+    }
+
+    // Identify: re-send properly filtered state to this connection
+    if (msg.type === 'identify') {
+      const filtered = this.filterStateForPlayer(msg.playerId);
+      sender.send(JSON.stringify({ type: 'gameState', data: filtered }));
       return;
     }
 
@@ -84,7 +95,7 @@ export default class GameServer implements Party.Server {
         break;
     }
 
-    this.broadcast();
+    this.broadcastFiltered();
   }
 
   handleJoin(msg: ClientMessage, sender: Party.Connection) {
@@ -203,7 +214,7 @@ export default class GameServer implements Party.Server {
       if (this.gameState && this.gameState.phase === 'playing') {
         this.gameState.phase = 'gameOver';
         this.gameState.winner = 'innocents';
-        this.broadcast();
+        this.broadcastFiltered();
       }
     }, GAME_CONFIG.GAME_DURATION * 1000);
   }
@@ -234,6 +245,9 @@ export default class GameServer implements Party.Server {
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
     if (!player || player.status !== 'alive') return;
+
+    // Locked doors: no movement allowed
+    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) return;
 
     // Validate the destination is connected to the player's current location
     const currentLoc = this.gameState.locations.find(l => l.id === player.location);
@@ -347,7 +361,7 @@ export default class GameServer implements Party.Server {
           duration: GAME_CONFIG.VOTING_TIME,
           startTime: Date.now(),
         };
-        this.broadcast();
+        this.broadcastFiltered();
 
         // After voting time, count votes and eject player
         const countTimer = setTimeout(() => {
@@ -411,7 +425,7 @@ export default class GameServer implements Party.Server {
 
     this.gameState.phase = 'gameOver';
     this.gameState.winner = 'konami';
-    this.broadcast();
+    this.broadcastFiltered();
   }
 
   handleSabotage(msg: ClientMessage) {
@@ -420,21 +434,42 @@ export default class GameServer implements Party.Server {
     const player = this.gameState.players[msg.playerId];
     if (!player || player.role !== 'impostor' || player.status !== 'alive') return;
 
-    if (msg.data?.type === 'lightsOut') {
-      // Can't stack lights out
-      if (this.gameState.lightsOut && this.gameState.lightsOut.until > Date.now()) return;
+    // Global sabotage cooldown — 45s between any sabotage
+    const now = Date.now();
+    if (now - this.lastSabotageTime < 45000) return;
 
-      this.gameState.lightsOut = {
-        until: Date.now() + 30000, // 30 seconds
-      };
+    // Can't stack active sabotages
+    if (this.gameState.lightsOut && this.gameState.lightsOut.until > now) return;
+    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > now) return;
 
-      // Auto-clear after 30s
+    const sabotageType = msg.data?.type;
+
+    if (sabotageType === 'lightsOut') {
+      this.lastSabotageTime = now;
+      this.gameState.lightsOut = { until: now + 30000 };
       setTimeout(() => {
         if (this.gameState) {
           this.gameState.lightsOut = undefined;
-          this.broadcast();
+          this.broadcastFiltered();
         }
       }, 30000);
+    } else if (sabotageType === 'doorsLocked') {
+      this.lastSabotageTime = now;
+      this.gameState.doorsLocked = { until: now + 25000 };
+      setTimeout(() => {
+        if (this.gameState) {
+          this.gameState.doorsLocked = undefined;
+          this.broadcastFiltered();
+        }
+      }, 25000);
+    } else if (sabotageType === 'scramble') {
+      this.lastSabotageTime = now;
+      // Randomly teleport all alive players to different rooms
+      const alivePlayers = Object.values(this.gameState.players).filter(p => p.status === 'alive');
+      const roomIds = this.gameState.locations.filter(l => l.id !== 'secret').map(l => l.id);
+      for (const p of alivePlayers) {
+        p.location = roomIds[Math.floor(Math.random() * roomIds.length)];
+      }
     }
   }
 
@@ -470,7 +505,7 @@ export default class GameServer implements Party.Server {
     setTimeout(() => {
       if (this.gameState?.players[pid]?.powerup) {
         this.gameState.players[pid].powerup = undefined;
-        this.broadcast();
+        this.broadcastFiltered();
       }
     }, 30000);
   }
@@ -509,14 +544,14 @@ export default class GameServer implements Party.Server {
       if (this.gameState && this.gameState.phase === 'results') {
         this.gameState.phase = 'playing';
         this.gameState.chat = [];
-        this.broadcast();
+        this.broadcastFiltered();
 
         this.checkWinCondition();
       }
     }, 5000);
     this.meetingTimers.push(resumeTimer);
 
-    this.broadcast();
+    this.broadcastFiltered();
   }
 
   checkWinCondition() {
@@ -562,20 +597,112 @@ export default class GameServer implements Party.Server {
 
     this.gameState.phase = 'gameOver';
     this.gameState.winner = winner;
-    this.broadcast();
+    this.broadcastFiltered();
   }
 
-  broadcast() {
+  // Send per-player filtered state to each connection
+  broadcastFiltered() {
     if (!this.gameState) return;
-    const message = JSON.stringify({ type: 'gameState', data: this.gameState });
-    console.log('Broadcasting to', Object.keys(this.gameState.players).length, 'players, phase:', this.gameState.phase);
-    this.room.broadcast(message);
+
+    for (const conn of this.room.getConnections()) {
+      const playerId = this.connectionToPlayer.get(conn.id);
+      if (playerId) {
+        const filtered = this.filterStateForPlayer(playerId);
+        conn.send(JSON.stringify({ type: 'gameState', data: filtered }));
+      } else {
+        // Unknown connection — send safe masked state
+        const safe = this.maskRoles(this.gameState);
+        conn.send(JSON.stringify({ type: 'gameState', data: safe }));
+      }
+    }
+  }
+
+  // Mask all roles as 'innocent' (safe default for unknown connections)
+  maskRoles(gs: GameState): GameState {
+    if (gs.phase === 'gameOver') return gs; // Roles revealed at game over
+    const filteredPlayers: Record<string, Player> = {};
+    for (const [id, p] of Object.entries(gs.players)) {
+      filteredPlayers[id] = { ...p, role: 'innocent', powerup: undefined };
+    }
+    return { ...gs, players: filteredPlayers, tasks: [] };
+  }
+
+  // Filter state for a specific player — hide what they shouldn't see
+  filterStateForPlayer(playerId: string): GameState {
+    if (!this.gameState) return this.gameState!;
+
+    const gs = this.gameState;
+    const player = gs.players[playerId];
+    if (!player) return this.maskRoles(gs);
+
+    // During game over, reveal everything
+    if (gs.phase === 'gameOver') return gs;
+
+    const isImpostor = player.role === 'impostor';
+
+    // Filter players — hide roles and powerups of others
+    const filteredPlayers: Record<string, Player> = {};
+    for (const [id, p] of Object.entries(gs.players)) {
+      if (id === playerId) {
+        filteredPlayers[id] = p; // Full info for yourself
+        continue;
+      }
+      const fp = { ...p };
+
+      // Roles: impostors see each other, innocents see everyone as innocent
+      if (!isImpostor) {
+        fp.role = 'innocent';
+      }
+
+      // Hide powerups on other players
+      fp.powerup = undefined;
+
+      filteredPlayers[id] = fp;
+    }
+
+    // Tasks: only your own
+    const filteredTasks = gs.tasks.filter(t => t.id.startsWith(playerId));
+
+    // Compute sixth sense warning server-side
+    const hasSixthSense = player.powerup?.type === 'sixthSense' && player.powerup.until > Date.now();
+    const sixthSenseWarning = hasSixthSense &&
+      Object.values(gs.players).some(p =>
+        p.id !== playerId && p.role === 'impostor' && p.status === 'alive' && p.location === player.location
+      );
+
+    // Compute bloodhound target server-side
+    let bloodhoundTarget: { name: string; locationName: string; color: string } | undefined;
+    if (player.powerup?.type === 'bloodhound' && player.powerup.until > Date.now()) {
+      const aliveInnocents = Object.values(gs.players).filter(
+        p => p.status === 'alive' && p.id !== playerId && p.role !== 'impostor'
+      );
+      if (aliveInnocents.length > 0) {
+        let mostIsolated = aliveInnocents[0];
+        let leastCompany = Infinity;
+        for (const p of aliveInnocents) {
+          const company = aliveInnocents.filter(o => o.location === p.location && o.id !== p.id).length;
+          if (company < leastCompany) {
+            leastCompany = company;
+            mostIsolated = p;
+          }
+        }
+        const loc = gs.locations.find(l => l.id === mostIsolated.location);
+        bloodhoundTarget = { name: mostIsolated.name, locationName: loc?.name || '???', color: mostIsolated.color };
+      }
+    }
+
+    return {
+      ...gs,
+      players: filteredPlayers,
+      tasks: filteredTasks,
+      sixthSenseWarning: sixthSenseWarning || undefined,
+      bloodhoundTarget,
+    };
   }
 
   onClose(connection: Party.Connection) {
-    console.log('Player disconnected:', connection.id);
+    this.connectionToPlayer.delete(connection.id);
     // Don't remove players on disconnect - they might reconnect
-    // This prevents issues with Safari tab suspension and page navigation
   }
 }
 

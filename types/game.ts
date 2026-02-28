@@ -71,12 +71,18 @@ export interface GameState {
   lightsOut?: {
     until: number; // timestamp when lights come back
   };
+  doorsLocked?: {
+    until: number; // timestamp when doors unlock
+  };
   secretRoomMethod?: 'piano' | 'shelves' | 'cases'; // which discovery is active this game
   secretRoomEntrance?: string; // which room has the hidden entrance this game
+  // Per-player computed fields (set by server for each connection)
+  sixthSenseWarning?: boolean;
+  bloodhoundTarget?: { name: string; locationName: string; color: string };
 }
 
 export interface ClientMessage {
-  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage' | 'enterSecretRoom';
+  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill' | 'sabotage' | 'enterSecretRoom' | 'identify';
   playerId: string;
   data?: any;
 }
