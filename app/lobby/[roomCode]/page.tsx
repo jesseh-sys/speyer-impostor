@@ -28,6 +28,24 @@ export default function Lobby() {
     },
   });
 
+  // Re-send join on reconnect so the server knows who we are
+  useEffect(() => {
+    const handleOpen = () => {
+      const pid = sessionStorage.getItem('playerId');
+      const name = localStorage.getItem('playerName') || 'Anonymous';
+      const icon = localStorage.getItem('playerIcon') || '@';
+      const color = localStorage.getItem('playerColor') || '#00ff41';
+      if (pid) {
+        socket.send(JSON.stringify({
+          type: 'join', playerId: pid,
+          data: { playerName: name, icon, color },
+        }));
+      }
+    };
+    socket.addEventListener('open', handleOpen);
+    return () => socket.removeEventListener('open', handleOpen);
+  }, [socket]);
+
   useEffect(() => {
     let persistentId = sessionStorage.getItem('playerId');
     if (!persistentId) {

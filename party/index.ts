@@ -912,18 +912,20 @@ export default class GameServer implements Party.Server {
       if (pid === playerId) return; // Still connected on another socket
     }
 
-    // During active game: give them 60s to reconnect, then mark dead
+    // During active game: give them 5 minutes to reconnect, then mark dead
+    // (browsers aggressively throttle background tabs, so short timers cause false deaths)
     const player = this.gameState.players[playerId];
     if (!player || player.status !== 'alive') return;
 
     const timer = setTimeout(() => {
-      if (this.gameState?.players[playerId]?.status === 'alive') {
+      if (this.gameState?.players[playerId]?.status === 'alive' &&
+          this.gameState.phase === 'playing') {
         this.gameState.players[playerId].status = 'dead';
         this.disconnectTimers.delete(playerId);
         this.checkWinCondition();
         this.broadcastFiltered();
       }
-    }, 60000);
+    }, 300000);
     this.disconnectTimers.set(playerId, timer);
   }
 }

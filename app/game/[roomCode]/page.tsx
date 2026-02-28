@@ -67,16 +67,10 @@ export default function Game() {
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
 
+  const socketRef = useRef<ReturnType<typeof usePartySocket> | null>(null);
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
     room: roomCode,
-    onOpen() {
-      // Re-identify on every connection (including reconnects after WiFi drop)
-      const pid = sessionStorage.getItem('playerId');
-      if (pid) {
-        socket.send(JSON.stringify({ type: 'identify', playerId: pid }));
-      }
-    },
     onMessage(event) {
       const msg = JSON.parse(event.data);
       if (msg.type === 'gameState') {
@@ -92,6 +86,24 @@ export default function Game() {
       }
     },
   });
+  socketRef.current = socket;
+
+  // Re-identify on every connection (including reconnects after WiFi drop)
+  // Done in a separate effect because socket isn't available inside its own onOpen
+  useEffect(() => {
+    const handleOpen = () => {
+      const pid = sessionStorage.getItem('playerId');
+      if (pid && socketRef.current) {
+        socketRef.current.send(JSON.stringify({ type: 'identify', playerId: pid }));
+      }
+    };
+    socket.addEventListener('open', handleOpen);
+    // If already connected, identify now
+    if (socket.readyState === WebSocket.OPEN) {
+      handleOpen();
+    }
+    return () => socket.removeEventListener('open', handleOpen);
+  }, [socket]);
 
   useEffect(() => {
     const persistentId = sessionStorage.getItem('playerId');
