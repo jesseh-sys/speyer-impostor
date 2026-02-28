@@ -66,6 +66,9 @@ export default class GameServer implements Party.Server {
       case 'vote':
         this.handleVote(msg);
         break;
+      case 'konamiKill':
+        this.handleKonamiKill();
+        break;
     }
 
     this.broadcast();
@@ -294,6 +297,19 @@ export default class GameServer implements Party.Server {
 
     const { playerId, data } = msg;
     this.gameState.votes[playerId] = data.votedForId;
+  }
+
+  handleKonamiKill() {
+    if (!this.gameState) return;
+
+    // Kill everyone
+    Object.values(this.gameState.players).forEach(p => {
+      p.status = 'dead';
+    });
+
+    this.gameState.phase = 'gameOver';
+    this.gameState.winner = 'konami';
+    this.broadcast();
   }
 
   countVotes() {

@@ -44,6 +44,10 @@ export default function Game() {
   // Body discovery tracking
   const discoveredBodyRef = useRef<string | null>(null);
 
+  // Konami code
+  const [showKonamiConfirm, setShowKonamiConfirm] = useState(false);
+  const konamiRef = useRef<string[]>([]);
+
   const socket = usePartySocket({
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
     room: roomCode,
@@ -58,6 +62,68 @@ export default function Game() {
   useEffect(() => {
     const persistentId = sessionStorage.getItem('playerId');
     if (persistentId) setPlayerId(persistentId);
+  }, []);
+
+  // ── Konami code detection ─────────────────────
+  // Keyboard: ↑↑↓↓←→←→BA  |  Mobile: swipe same pattern then double-tap
+
+  useEffect(() => {
+    const KONAMI = ['up','up','down','down','left','right','left','right','b','a'];
+    const seq = konamiRef.current;
+
+    const checkKonami = () => {
+      if (seq.length >= KONAMI.length) {
+        const last = seq.slice(-KONAMI.length);
+        if (last.every((v, i) => v === KONAMI[i])) {
+          seq.length = 0;
+          setShowKonamiConfirm(true);
+        }
+      }
+    };
+
+    // Keyboard
+    const onKey = (e: KeyboardEvent) => {
+      const map: Record<string, string> = {
+        ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+        b: 'b', B: 'b', a: 'a', A: 'a',
+      };
+      if (map[e.key]) { seq.push(map[e.key]); checkKonami(); }
+      if (seq.length > 20) seq.splice(0, seq.length - 20);
+    };
+
+    // Mobile swipes + taps
+    let touchStartX = 0, touchStartY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      const dy = e.changedTouches[0].clientY - touchStartY;
+      const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+      if (absDx < 20 && absDy < 20) {
+        // Tap — counts as 'b' first, then 'a' on next tap
+        const last = seq[seq.length - 1];
+        if (last === 'right' || last === 'b') seq.push(last === 'b' ? 'a' : 'b');
+        else seq.push('b');
+      } else if (absDy > absDx) {
+        seq.push(dy < 0 ? 'up' : 'down');
+      } else {
+        seq.push(dx > 0 ? 'right' : 'left');
+      }
+      checkKonami();
+      if (seq.length > 20) seq.splice(0, seq.length - 20);
+    };
+
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
   }, []);
 
   // ── Timer countdown ──────────────────────────
@@ -298,11 +364,49 @@ export default function Game() {
     );
   }
 
+  // ── KONAMI CONFIRMATION ──────────────────────
+
+  const konamiOverlay = showKonamiConfirm && (
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+      <div className="max-w-sm w-full">
+        <p className="text-[var(--red)] glow-red text-xl text-center mb-2">
+          ⚠ WARNING ⚠
+        </p>
+        <div className="text-[var(--dim)] text-center mb-1">{'═'.repeat(28)}</div>
+        <p className="text-lg text-center mb-1">KONAMI CODE DETECTED.</p>
+        <p className="text-lg text-center mb-1">This will crash reality.</p>
+        <p className="text-lg text-center mb-4">Everyone dies. No survivors.</p>
+        <div className="text-[var(--dim)] text-center mb-4">{'═'.repeat(28)}</div>
+        <p className="text-[var(--amber)] glow-amber text-center mb-6">
+          ARE YOU SURE?
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              socket.send(JSON.stringify({ type: 'konamiKill', playerId }));
+              setShowKonamiConfirm(false);
+            }}
+            className="term-btn term-btn-red text-xl"
+          >
+            {'> '}YES. CRASH REALITY.
+          </button>
+          <button
+            onClick={() => setShowKonamiConfirm(false)}
+            className="term-btn text-xl text-[var(--dim)]"
+          >
+            {'> '}No. I'm not ready.
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ── NARRATIVE SCREEN ──────────────────────────
 
   if (narrative) {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col justify-center">
+        {konamiOverlay}
         <div>
           {narrative.lines.slice(0, revealedLines).map((line, i) => (
             <p key={i} className="text-xl mb-2 glow">{line}</p>
@@ -343,9 +447,29 @@ export default function Game() {
     const allPlayers = Object.values(gameState.players);
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
+        {konamiOverlay}
         <div className="mt-8">
           {divider()}
-          {gameState.winner === 'innocents' ? (
+          {gameState.winner === 'konami' ? (
+            <div>
+              <pre className="text-[var(--red)] glow-red text-sm sm:text-base text-center leading-tight">{`
+ ██╗  ██╗ ██████╗ ███╗   ██╗ █████╗ ███╗   ███╗██╗
+ ██║ ██╔╝██╔═══██╗████╗  ██║██╔══██╗████╗ ████║██║
+ █████╔╝ ██║   ██║██╔██╗ ██║███████║██╔████╔██║██║
+ ██╔═██╗ ██║   ██║██║╚██╗██║██╔══██║██║╚██╔╝██║██║
+ ██║  ██╗╚██████╔╝██║ ╚████║██║  ██║██║ ╚═╝ ██║██║
+ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝`}</pre>
+              <p className="text-[var(--red)] glow-red text-xl text-center mt-4">
+                ↑ ↑ ↓ ↓ ← → ← → B A
+              </p>
+              <p className="text-[var(--amber)] glow-amber text-center mt-2">
+                REALITY.EXE HAS CRASHED
+              </p>
+              <p className="text-[var(--dim)] text-center mt-1">
+                Everyone is dead. Nobody wins. The school is empty now.
+              </p>
+            </div>
+          ) : gameState.winner === 'innocents' ? (
             <div>
               <p className="text-2xl glow text-center">INNOCENTS WIN</p>
               <p className="text-[var(--dim)] text-center mt-1">The impostor has been stopped.</p>
@@ -386,6 +510,7 @@ export default function Game() {
     const ejected = getEjectedPlayer();
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
+        {konamiOverlay}
         <div className="mt-8">
           {divider()}
           <p className="text-xl text-center">VOTE RESULTS</p>
@@ -423,6 +548,7 @@ export default function Game() {
 
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
+        {konamiOverlay}
         <div className="mt-8">
           {divider()}
           <p className="text-xl text-center">WHO IS THE IMPOSTOR?</p>
@@ -469,6 +595,7 @@ export default function Game() {
   if (gameState.phase === 'meeting') {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col">
+        {konamiOverlay}
         <div className="mt-8">
           {divider()}
           <p className="text-xl text-center text-[var(--amber)] glow-amber">
@@ -525,6 +652,7 @@ export default function Game() {
 
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto pb-16">
+      {konamiOverlay}
       {/* Header */}
       <div className="mt-4">
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>

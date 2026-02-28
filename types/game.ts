@@ -61,11 +61,11 @@ export interface GameState {
     duration: number;
     startTime: number;
   };
-  winner?: 'innocents' | 'impostors';
+  winner?: 'innocents' | 'impostors' | 'konami';
 }
 
 export interface ClientMessage {
-  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame';
+  type: 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'konamiKill';
   playerId: string;
   data?: any;
 }
