@@ -47,13 +47,15 @@ export default function Lobby() {
   }, [socket]);
 
   useEffect(() => {
-    let persistentId = sessionStorage.getItem('playerId');
+    let persistentId = sessionStorage.getItem('playerId')
+      || localStorage.getItem(`playerId-${roomCode}`);
     if (!persistentId) {
       persistentId = `player-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      sessionStorage.setItem('playerId', persistentId);
     }
+    sessionStorage.setItem('playerId', persistentId);
+    localStorage.setItem(`playerId-${roomCode}`, persistentId);
     setPlayerId(persistentId);
-  }, []);
+  }, [roomCode]);
 
   useEffect(() => {
     if (!socket || !playerId) return;

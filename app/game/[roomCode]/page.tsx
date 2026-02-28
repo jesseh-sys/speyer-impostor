@@ -9,7 +9,6 @@ import {
   getTravelNarrative,
   getTaskNarrative,
   getKillNarrative,
-  getReportNarrative,
   getDiscoveryNarrative,
   getMeetingNarrative,
   getIdleFlavor,
@@ -155,9 +154,15 @@ export default function Game() {
   }, [socket]);
 
   useEffect(() => {
-    const persistentId = sessionStorage.getItem('playerId');
-    if (persistentId) setPlayerId(persistentId);
-  }, []);
+    // Try sessionStorage first (survives refresh), then localStorage (survives tab close)
+    const persistentId = sessionStorage.getItem('playerId')
+      || localStorage.getItem(`playerId-${roomCode}`);
+    if (persistentId) {
+      setPlayerId(persistentId);
+      sessionStorage.setItem('playerId', persistentId);
+      localStorage.setItem(`playerId-${roomCode}`, persistentId);
+    }
+  }, [roomCode]);
 
   // Note: identify is handled by the handleOpen listener above (fires on connect + reconnect).
   // No separate effect needed — avoids double-send race.
@@ -266,12 +271,12 @@ export default function Game() {
 
     const t1 = setTimeout(() => {
       setGrueWarning(1);
-      setFlavorLines(prev => [...prev.slice(-1), 'It is getting dark...']);
+      setFlavorLines(prev => [...prev.slice(-1), 'The shadows are closing in...']);
     }, 50000);
 
     const t2 = setTimeout(() => {
       setGrueWarning(2);
-      setFlavorLines(prev => [...prev.slice(-1), 'You are likely to be eaten by a grue.']);
+      setFlavorLines(prev => [...prev.slice(-1), 'Something is watching you. MOVE.']);
     }, 75000);
 
     const t3 = setTimeout(() => {
@@ -287,7 +292,7 @@ export default function Game() {
       if (!exits.length) return;
       const randomExit = exits[Math.floor(Math.random() * exits.length)];
       setGrueWarning(0);
-      setFlavorLines(['A grue has found you! You flee in terror.']);
+      setFlavorLines(['Something grabbed you! You stumble into another room.']);
       socket.send(JSON.stringify({ type: 'move', playerId, data: { location: randomExit } }));
     }, 90000);
 
@@ -495,16 +500,8 @@ export default function Game() {
   };
 
   const handleReportBody = () => {
-    // Keep functional — choice A reports, choice B walks away
-    const bodyHere = gameState?.deadBodies?.find(b => b.location === currentPlayer?.location);
-    const bodyPlayer = bodyHere ? gameState?.players[bodyHere.playerId] : null;
-    const template = getReportNarrative(bodyPlayer?.name || 'someone');
-    startNarrative(
-      template,
-      () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
-      () => {},
-      false,
-    );
+    // Send report directly — no second narrative (discovery narrative already asked)
+    socket.send(JSON.stringify({ type: 'reportBody', playerId }));
   };
 
   // Secret room: tap description to discover (3 taps)
@@ -974,7 +971,6 @@ export default function Game() {
                   <p key={pid} className="text-base ml-2">
                     <span style={{ color: p.color }}>{p.name}</span>
                     <span className="text-[var(--dim)]"> — {locName}</span>
-                    <span className="text-[var(--dim)]"> [{p.tasksCompleted}/{p.totalTasks} tasks]</span>
                   </p>
                 );
               })}
@@ -1023,7 +1019,6 @@ export default function Game() {
                 className="term-input flex-1"
                 placeholder="speak..."
                 maxLength={200}
-                autoFocus
               />
             </form>
           </div>

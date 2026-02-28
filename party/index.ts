@@ -21,6 +21,7 @@ export default class GameServer implements Party.Server {
   private meetingsCalled: Set<string> = new Set(); // players who used their 1 emergency meeting
   private meetingLocations: Record<string, string> = {}; // snapshot of player locations at meeting start
   private reportedBody?: { name: string; location: string; reportedBy: string };
+  private lastChatTimes: Record<string, number> = {}; // rate limit: 1 msg per 2s per player
 
   constructor(readonly room: Party.Room) {}
 
@@ -512,6 +513,11 @@ export default class GameServer implements Party.Server {
       const message = typeof msg.data.message === 'string' ? msg.data.message.slice(0, 200) : '';
       if (!message) return;
 
+      // Rate limit: 1 message per 2 seconds per player
+      const now = Date.now();
+      if (now - (this.lastChatTimes[msg.playerId] || 0) < 2000) return;
+      this.lastChatTimes[msg.playerId] = now;
+
       this.gameState.chat.push({
         id: `${Date.now()}-${msg.playerId}`,
         playerId: msg.playerId,
@@ -659,6 +665,14 @@ export default class GameServer implements Party.Server {
   countVotes() {
     if (!this.gameState) return;
     if (this.gameState.phase !== 'voting') return; // Prevent double-fire
+
+    // Force skip for anyone who didn't vote (prevents AFK/trolls from blocking ejections)
+    const alivePlayers = Object.values(this.gameState.players).filter(p => p.status === 'alive');
+    for (const p of alivePlayers) {
+      if (this.gameState.votes[p.id] === undefined) {
+        this.gameState.votes[p.id] = 'skip';
+      }
+    }
 
     const voteCounts: Record<string, number> = {};
 
@@ -857,6 +871,7 @@ export default class GameServer implements Party.Server {
     this.meetingsCalled = new Set();
     this.meetingLocations = {};
     this.reportedBody = undefined;
+    this.lastChatTimes = {};
     this.disconnectTimers.forEach(t => clearTimeout(t));
     this.disconnectTimers.clear();
   }
