@@ -545,8 +545,8 @@ const EASTER_EGG_KILL: {
 const SECRET_ROOM_BY_METHOD: Record<string, NarrativeTemplate> = {
   piano: {
     lines: [
-      "You notice something behind the piano.",
-      "A seam in the wall. A door?",
+      "You notice a seam in the wall.",
+      "Behind the furniture. A door?",
       "It shouldn't be here.",
       "Room 404. Not Found.",
       "...except it is.",
@@ -556,7 +556,7 @@ const SECRET_ROOM_BY_METHOD: Record<string, NarrativeTemplate> = {
   },
   shelves: {
     lines: [
-      "A faint hum comes from behind the sheet music shelves.",
+      "A faint hum comes from behind the shelves.",
       "You push them aside.",
       "A door. Old. Wrong.",
       "The handle is warm.",
@@ -566,13 +566,13 @@ const SECRET_ROOM_BY_METHOD: Record<string, NarrativeTemplate> = {
   },
   cases: {
     lines: [
-      "The instrument cases rattle.",
-      "One of them isn't a case.",
-      "It's a passage.",
+      "Something rattles in the back of the room.",
+      "You pull it aside.",
+      "A passage. Narrow. Dark.",
       "Room 404.",
     ],
     choiceA: { label: "Crawl through", result: "The passage leads to a room that shouldn't exist." },
-    choiceB: { label: "Close it", result: "It latches shut. The rattling stops." },
+    choiceB: { label: "Close it", result: "It shuts. The rattling stops." },
   },
 };
 

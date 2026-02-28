@@ -177,6 +177,19 @@ export default class GameServer implements Party.Server {
     // Pick which secret room discovery method is active this game
     const methods = ['piano', 'shelves', 'cases'] as const;
     this.gameState.secretRoomMethod = methods[Math.floor(Math.random() * methods.length)];
+
+    // Randomize which room has the secret entrance (exclude 'secret' itself and 'speyer' spawn)
+    const eligibleRooms = this.gameState.locations
+      .filter(l => l.id !== 'secret' && l.id !== 'speyer')
+      .map(l => l.id);
+    const entranceRoom = eligibleRooms[Math.floor(Math.random() * eligibleRooms.length)];
+    this.gameState.secretRoomEntrance = entranceRoom;
+
+    // Update Room 404's connectedTo to point back to this game's entrance
+    const secretLoc = this.gameState.locations.find(l => l.id === 'secret');
+    if (secretLoc) {
+      secretLoc.connectedTo = [entranceRoom];
+    }
   }
 
   assignTasks(playerId: string) {
@@ -363,8 +376,8 @@ export default class GameServer implements Party.Server {
     const player = this.gameState.players[msg.playerId];
     if (!player || player.status !== 'alive') return;
 
-    // Must be in the Music Room (the connected room)
-    if (player.location !== 'music') return;
+    // Must be in the room with the secret entrance
+    if (player.location !== this.gameState.secretRoomEntrance) return;
 
     // Already have an active powerup? Can't stack.
     if (player.powerup && player.powerup.until > Date.now()) return;

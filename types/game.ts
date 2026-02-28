@@ -72,6 +72,7 @@ export interface GameState {
     until: number; // timestamp when lights come back
   };
   secretRoomMethod?: 'piano' | 'shelves' | 'cases'; // which discovery is active this game
+  secretRoomEntrance?: string; // which room has the hidden entrance this game
 }
 
 export interface ClientMessage {

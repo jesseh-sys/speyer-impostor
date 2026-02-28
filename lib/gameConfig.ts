@@ -72,7 +72,7 @@ export const LOCATIONS: Location[] = [
   {
     id: 'secret', name: 'Room 404',
     description: 'This room shouldn\'t exist. The walls hum. A terminal glows in the corner. It knows your name.',
-    x: 60, y: 80, connectedTo: ['music'],
+    x: 60, y: 80, connectedTo: [], // Set dynamically each game by the server
   },
 ];
 

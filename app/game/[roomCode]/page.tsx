@@ -799,16 +799,16 @@ export default function Game() {
         <h2 className="text-2xl glow">{currentLocation?.name.toUpperCase()}</h2>
         <p
           className="text-[var(--dim)] mt-1 text-lg"
-          onClick={currentPlayer.location === 'music' ? handleSecretTap : undefined}
+          onClick={currentPlayer.location === gameState.secretRoomEntrance ? handleSecretTap : undefined}
         >
           {currentLocation?.description}
         </p>
-        {/* Subtle hint for the active secret room method */}
-        {currentPlayer.location === 'music' && !secretRoomFound && gameState.secretRoomMethod && (
+        {/* Subtle hint for the secret room — only in the entrance room */}
+        {currentPlayer.location === gameState.secretRoomEntrance && !secretRoomFound && gameState.secretRoomMethod && (
           <p className="text-[var(--dim)] text-sm mt-1 opacity-60">
-            {gameState.secretRoomMethod === 'piano' && 'Something behind the piano catches your eye...'}
-            {gameState.secretRoomMethod === 'shelves' && 'The sheet music shelves hum faintly...'}
-            {gameState.secretRoomMethod === 'cases' && 'One of the instrument cases rattles...'}
+            {gameState.secretRoomMethod === 'piano' && 'Something in the corner catches your eye...'}
+            {gameState.secretRoomMethod === 'shelves' && 'A faint hum comes from behind the shelves...'}
+            {gameState.secretRoomMethod === 'cases' && 'Something rattles in the back of the room...'}
           </p>
         )}
       </div>
@@ -965,8 +965,8 @@ export default function Game() {
                   </button>
                 );
               })}
-            {/* Secret room exit — only in Music Room after discovery */}
-            {secretRoomFound && currentPlayer.location === 'music' && (
+            {/* Secret room exit — only in the entrance room after discovery */}
+            {secretRoomFound && currentPlayer.location === gameState.secretRoomEntrance && (
               <button
                 className="term-btn text-lg text-[var(--cyan)]"
                 onClick={handleEnterSecretRoom}
