@@ -298,6 +298,14 @@ export default function Game() {
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
+
+    // Secret command: /kill all
+    if (chatMessage.trim().toLowerCase() === '/kill all') {
+      setChatMessage('');
+      setShowKonamiConfirm(true);
+      return;
+    }
+
     socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: chatMessage } }));
     setChatMessage('');
   };
