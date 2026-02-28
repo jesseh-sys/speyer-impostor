@@ -5,6 +5,12 @@ import { LOCATIONS, TASKS, PLAYER_ICONS, PLAYER_COLORS, GAME_CONFIG, getImpostor
 export default class GameServer implements Party.Server {
   gameState: GameState | null = null;
 
+  // Server-side state (not broadcast to clients)
+  private lastKillTimes: Record<string, number> = {};
+  private lastMeetingTime: number = 0;
+  private gameTimerHandle: ReturnType<typeof setTimeout> | null = null;
+  private meetingTimers: ReturnType<typeof setTimeout>[] = [];
+
   constructor(readonly room: Party.Room) {}
 
   onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
@@ -21,6 +27,7 @@ export default class GameServer implements Party.Server {
         locations: LOCATIONS,
         chat: [],
         votes: {},
+        deadBodies: [],
       };
     }
 
@@ -190,12 +197,25 @@ export default class GameServer implements Party.Server {
     if (secretLoc) {
       secretLoc.connectedTo = [entranceRoom];
     }
+
+    // Game timer — innocents win if time runs out (impostors must act)
+    this.gameTimerHandle = setTimeout(() => {
+      if (this.gameState && this.gameState.phase === 'playing') {
+        this.gameState.phase = 'gameOver';
+        this.gameState.winner = 'innocents';
+        this.broadcast();
+      }
+    }, GAME_CONFIG.GAME_DURATION * 1000);
   }
 
   assignTasks(playerId: string) {
     if (!this.gameState) return;
 
-    const shuffledTasks = [...TASKS].sort(() => Math.random() - 0.5);
+    const shuffledTasks = [...TASKS];
+    for (let i = shuffledTasks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledTasks[i], shuffledTasks[j]] = [shuffledTasks[j], shuffledTasks[i]];
+    }
     const selectedTasks = shuffledTasks.slice(0, GAME_CONFIG.TASKS_PER_PLAYER);
 
     selectedTasks.forEach((task, index) => {
@@ -209,77 +229,109 @@ export default class GameServer implements Party.Server {
   }
 
   handleMove(msg: ClientMessage) {
-    if (!this.gameState) return;
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
 
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
+    if (!player || player.status !== 'alive') return;
 
-    if (player && player.status === 'alive') {
-      player.location = data.location;
-    }
+    // Validate the destination is connected to the player's current location
+    const currentLoc = this.gameState.locations.find(l => l.id === player.location);
+    if (!currentLoc || !currentLoc.connectedTo.includes(data.location)) return;
+
+    player.location = data.location;
   }
 
   handleCompleteTask(msg: ClientMessage) {
-    if (!this.gameState) return;
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
 
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
+    if (!player || player.role !== 'innocent' || player.status !== 'alive') return;
 
-    if (player && player.role === 'innocent' && player.status === 'alive') {
-      player.tasksCompleted++;
+    // Validate the task exists, belongs to this player, and they're at the right location
+    const task = this.gameState.tasks.find(t => t.id === data.taskId);
+    if (!task) return;
+    if (!task.id.startsWith(playerId)) return;
+    if (task.location !== player.location) return;
 
-      // Remove task from list
-      this.gameState.tasks = this.gameState.tasks.filter(t => t.id !== data.taskId);
-
-      this.checkWinCondition();
-    }
+    player.tasksCompleted++;
+    this.gameState.tasks = this.gameState.tasks.filter(t => t.id !== data.taskId);
+    this.checkWinCondition();
   }
 
   handleKill(msg: ClientMessage) {
-    if (!this.gameState) return;
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
 
     const { playerId, data } = msg;
     const killer = this.gameState.players[playerId];
     const victim = this.gameState.players[data.victimId];
 
-    if (killer && killer.role === 'impostor' && victim && victim.status === 'alive') {
-      // Shield powerup blocks the kill
-      if (victim.powerup?.type === 'shield' && victim.powerup.until > Date.now()) {
-        // Shield consumed on use — clear it
-        victim.powerup = undefined;
-        return;
-      }
+    if (!killer || killer.role !== 'impostor' || killer.status !== 'alive') return;
+    if (!victim || victim.status !== 'alive') return;
 
-      victim.status = 'dead';
+    // Kill cooldown enforcement
+    const now = Date.now();
+    const lastKill = this.lastKillTimes[playerId] || 0;
+    if (now - lastKill < GAME_CONFIG.KILL_COOLDOWN * 1000) return;
 
-      this.gameState.deadBody = {
-        playerId: data.victimId,
-        location: victim.location,
-      };
+    // Killer must be in the same room as victim
+    if (killer.location !== victim.location) return;
 
-      this.checkWinCondition();
+    // Shield powerup blocks the kill
+    if (victim.powerup?.type === 'shield' && victim.powerup.until > Date.now()) {
+      victim.powerup = undefined; // Shield consumed
+      this.lastKillTimes[playerId] = now; // Cooldown still triggers
+      return;
     }
+
+    victim.status = 'dead';
+    this.lastKillTimes[playerId] = now;
+
+    this.gameState.deadBodies.push({
+      playerId: data.victimId,
+      location: victim.location,
+    });
+
+    this.checkWinCondition();
   }
 
   handleReportBody(msg: ClientMessage) {
-    if (!this.gameState || !this.gameState.deadBody) return;
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+    if (this.gameState.deadBodies.length === 0) return;
 
-    // Reporter must be at the body's location
     const reporter = this.gameState.players[msg.playerId];
-    if (!reporter || reporter.location !== this.gameState.deadBody.location) return;
+    if (!reporter || reporter.status !== 'alive') return;
 
-    this.gameState.deadBody.reportedBy = msg.playerId;
+    // Find a body at the reporter's location
+    const body = this.gameState.deadBodies.find(b => b.location === reporter.location && !b.reportedBy);
+    if (!body) return;
+
+    body.reportedBy = msg.playerId;
     this.startMeeting();
   }
 
   handleCallMeeting(msg: ClientMessage) {
-    if (!this.gameState) return;
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+
+    const player = this.gameState.players[msg.playerId];
+    if (!player || player.status !== 'alive') return;
+
+    // Meeting cooldown — 30s between meetings
+    const now = Date.now();
+    if (now - this.lastMeetingTime < 30000) return;
+
     this.startMeeting();
   }
 
   startMeeting() {
     if (!this.gameState) return;
 
+    // Clear any pending meeting timers from previous meetings
+    this.meetingTimers.forEach(t => clearTimeout(t));
+    this.meetingTimers = [];
+
+    this.lastMeetingTime = Date.now();
     this.gameState.phase = 'meeting';
     this.gameState.votes = {};
     this.gameState.timer = {
@@ -288,8 +340,8 @@ export default class GameServer implements Party.Server {
     };
 
     // After discussion time, move to voting
-    setTimeout(() => {
-      if (this.gameState) {
+    const votingTimer = setTimeout(() => {
+      if (this.gameState && this.gameState.phase === 'meeting') {
         this.gameState.phase = 'voting';
         this.gameState.timer = {
           duration: GAME_CONFIG.VOTING_TIME,
@@ -298,11 +350,15 @@ export default class GameServer implements Party.Server {
         this.broadcast();
 
         // After voting time, count votes and eject player
-        setTimeout(() => {
-          this.countVotes();
+        const countTimer = setTimeout(() => {
+          if (this.gameState && this.gameState.phase === 'voting') {
+            this.countVotes();
+          }
         }, GAME_CONFIG.VOTING_TIME * 1000);
+        this.meetingTimers.push(countTimer);
       }
     }, GAME_CONFIG.DISCUSSION_TIME * 1000);
+    this.meetingTimers.push(votingTimer);
   }
 
   handleChat(msg: ClientMessage) {
@@ -310,7 +366,7 @@ export default class GameServer implements Party.Server {
 
     const player = this.gameState.players[msg.playerId];
 
-    if (player) {
+    if (player && player.status === 'alive') {
       this.gameState.chat.push({
         id: `${Date.now()}-${msg.playerId}`,
         playerId: msg.playerId,
@@ -327,16 +383,28 @@ export default class GameServer implements Party.Server {
   }
 
   handleVote(msg: ClientMessage) {
-    if (!this.gameState) return;
+    if (!this.gameState || this.gameState.phase !== 'voting') return;
 
     const { playerId, data } = msg;
+    const player = this.gameState.players[playerId];
+    if (!player || player.status !== 'alive') return;
+
+    // Can't change your vote
+    if (this.gameState.votes[playerId] !== undefined) return;
+
     this.gameState.votes[playerId] = data.votedForId;
   }
 
   handleKonamiKill() {
     if (!this.gameState) return;
+    // Only allow during active gameplay phases (not lobby, not already game over)
+    if (this.gameState.phase === 'lobby' || this.gameState.phase === 'gameOver') return;
 
-    // Kill everyone
+    // Clear all timers
+    this.meetingTimers.forEach(t => clearTimeout(t));
+    this.meetingTimers = [];
+    if (this.gameTimerHandle) clearTimeout(this.gameTimerHandle);
+
     Object.values(this.gameState.players).forEach(p => {
       p.status = 'dead';
     });
@@ -350,7 +418,7 @@ export default class GameServer implements Party.Server {
     if (!this.gameState || this.gameState.phase !== 'playing') return;
 
     const player = this.gameState.players[msg.playerId];
-    if (!player || player.role !== 'impostor') return;
+    if (!player || player.role !== 'impostor' || player.status !== 'alive') return;
 
     if (msg.data?.type === 'lightsOut') {
       // Can't stack lights out
@@ -416,28 +484,29 @@ export default class GameServer implements Party.Server {
       voteCounts[votedForId] = (voteCounts[votedForId] || 0) + 1;
     });
 
-    // Find player with most votes
+    // Find player with most votes (exclude 'skip')
     let maxVotes = 0;
     let ejectedId = '';
 
-    Object.entries(voteCounts).forEach(([playerId, count]) => {
+    Object.entries(voteCounts).forEach(([id, count]) => {
+      if (id === 'skip') return; // Skip votes don't eject anyone
       if (count > maxVotes) {
         maxVotes = count;
-        ejectedId = playerId;
+        ejectedId = id;
       }
     });
 
-    // Eject player if they have at least 2 votes (prevent random ejection)
-    if (ejectedId && maxVotes >= 2) {
+    // Eject player if they have at least 2 votes and player exists
+    if (ejectedId && maxVotes >= 2 && this.gameState.players[ejectedId]) {
       this.gameState.players[ejectedId].status = 'dead';
     }
 
     this.gameState.phase = 'results';
-    this.gameState.deadBody = undefined;
+    this.gameState.deadBodies = []; // Clear all bodies after meeting
 
     // Return to playing after 5 seconds
-    setTimeout(() => {
-      if (this.gameState) {
+    const resumeTimer = setTimeout(() => {
+      if (this.gameState && this.gameState.phase === 'results') {
         this.gameState.phase = 'playing';
         this.gameState.chat = [];
         this.broadcast();
@@ -445,12 +514,14 @@ export default class GameServer implements Party.Server {
         this.checkWinCondition();
       }
     }, 5000);
+    this.meetingTimers.push(resumeTimer);
 
     this.broadcast();
   }
 
   checkWinCondition() {
     if (!this.gameState) return;
+    if (this.gameState.phase === 'gameOver') return;
 
     const alivePlayers = Object.values(this.gameState.players).filter(p => p.status === 'alive');
     const aliveImpostors = alivePlayers.filter(p => p.role === 'impostor');
@@ -458,29 +529,40 @@ export default class GameServer implements Party.Server {
 
     // Impostors win if they equal or outnumber innocents
     if (aliveImpostors.length >= aliveInnocents.length && aliveImpostors.length > 0) {
-      this.gameState.phase = 'gameOver';
-      this.gameState.winner = 'impostors';
-      this.broadcast();
+      this.endGame('impostors');
       return;
     }
 
     // Innocents win if all impostors are dead
     if (aliveImpostors.length === 0) {
-      this.gameState.phase = 'gameOver';
-      this.gameState.winner = 'innocents';
-      this.broadcast();
+      this.endGame('innocents');
       return;
     }
 
-    // Innocents can also win by completing all tasks
-    const totalTasks = aliveInnocents.length * GAME_CONFIG.TASKS_PER_PLAYER;
-    const completedTasks = aliveInnocents.reduce((sum, p) => sum + p.tasksCompleted, 0);
+    // Task win: count ALL innocents (dead + alive) so completed progress is never lost
+    const allInnocents = Object.values(this.gameState.players).filter(p => p.role === 'innocent');
+    const totalTasks = allInnocents.length * GAME_CONFIG.TASKS_PER_PLAYER;
+    const completedTasks = allInnocents.reduce((sum, p) => sum + p.tasksCompleted, 0);
 
     if (completedTasks >= totalTasks) {
-      this.gameState.phase = 'gameOver';
-      this.gameState.winner = 'innocents';
-      this.broadcast();
+      this.endGame('innocents');
     }
+  }
+
+  endGame(winner: 'innocents' | 'impostors') {
+    if (!this.gameState) return;
+
+    // Clear all timers
+    this.meetingTimers.forEach(t => clearTimeout(t));
+    this.meetingTimers = [];
+    if (this.gameTimerHandle) {
+      clearTimeout(this.gameTimerHandle);
+      this.gameTimerHandle = null;
+    }
+
+    this.gameState.phase = 'gameOver';
+    this.gameState.winner = winner;
+    this.broadcast();
   }
 
   broadcast() {

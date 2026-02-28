@@ -58,11 +58,11 @@ export interface GameState {
   locations: Location[];
   chat: ChatMessage[];
   votes: Record<string, string>; // playerId -> votedForId
-  deadBody?: {
+  deadBodies: {
     playerId: string;
     location: string;
     reportedBy?: string;
-  };
+  }[];
   timer?: {
     duration: number;
     startTime: number;

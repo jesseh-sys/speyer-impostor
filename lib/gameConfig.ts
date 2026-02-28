@@ -17,7 +17,7 @@ export const LOCATIONS: Location[] = [
   {
     id: 'speyer', name: 'Speyer School',
     description: 'The front entrance of Speyer. Hallway lights flicker. A locker slams shut somewhere in the distance.',
-    x: 50, y: 20, connectedTo: ['lobby', 'cafeteria', 'boulevard'],
+    x: 50, y: 20, connectedTo: ['lobby', 'cafeteria', 'boulevard', 'meyers'],
   },
   {
     id: 'boulevard', name: 'The Boulevard',

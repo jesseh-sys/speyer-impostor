@@ -224,30 +224,34 @@ export default function Game() {
 
   // ── Body discovery ──────────────────────────
 
-  // Clear discovery tracking when body is cleared (after meeting)
+  // Clear discovery tracking when bodies are cleared (after meeting)
   useEffect(() => {
-    if (!gameState?.deadBody) {
+    if (!gameState?.deadBodies?.length) {
       discoveredBodyRef.current = null;
     }
-  }, [gameState?.deadBody]);
+  }, [gameState?.deadBodies?.length]);
 
   // Auto-trigger discovery narrative when entering a room with a body
   useEffect(() => {
     if (narrative) return;
-    if (!gameState?.deadBody || !currentPlayer) return;
+    if (!gameState?.deadBodies?.length || !currentPlayer) return;
     if (currentPlayer.status === 'dead') return;
-    if (currentPlayer.location !== gameState.deadBody.location) return;
-    if (discoveredBodyRef.current === gameState.deadBody.playerId) return;
 
-    discoveredBodyRef.current = gameState.deadBody.playerId;
-    const bodyPlayer = gameState.players[gameState.deadBody.playerId];
+    // Find a body in our room that we haven't discovered yet
+    const bodyHere = gameState.deadBodies.find(
+      b => b.location === currentPlayer.location && b.playerId !== discoveredBodyRef.current
+    );
+    if (!bodyHere) return;
+
+    discoveredBodyRef.current = bodyHere.playerId;
+    const bodyPlayer = gameState.players[bodyHere.playerId];
     const template = getDiscoveryNarrative(bodyPlayer?.name || 'someone');
     startNarrative(
       template,
       () => socket.send(JSON.stringify({ type: 'reportBody', playerId })),
       () => {}, // back away — body stays, report button still available
     );
-  }, [narrative, currentPlayer?.location, gameState?.deadBody?.playerId, currentPlayer?.status]);
+  }, [narrative, currentPlayer?.location, gameState?.deadBodies?.length, currentPlayer?.status]);
 
   // ── Helpers ───────────────────────────────────
 
@@ -336,9 +340,8 @@ export default function Game() {
   };
 
   const handleReportBody = () => {
-    const bodyPlayer = gameState?.deadBody
-      ? gameState.players[gameState.deadBody.playerId]
-      : null;
+    const bodyHere = gameState?.deadBodies?.find(b => b.location === currentPlayer?.location);
+    const bodyPlayer = bodyHere ? gameState?.players[bodyHere.playerId] : null;
     const template = getReportNarrative(bodyPlayer?.name || 'someone');
     startNarrative(
       template,
@@ -414,9 +417,10 @@ export default function Game() {
     let maxVotes = 0;
     let ejectedId = '';
     Object.entries(voteCounts).forEach(([id, count]) => {
+      if (id === 'skip') return;
       if (count > maxVotes) { maxVotes = count; ejectedId = id; }
     });
-    if (ejectedId && maxVotes >= 2) return gameState.players[ejectedId];
+    if (ejectedId && maxVotes >= 2) return gameState.players[ejectedId] || null;
     return null;
   };
 
@@ -683,7 +687,7 @@ export default function Game() {
         <div className="mt-8">
           {divider()}
           <p className="text-xl text-center text-[var(--amber)] glow-amber">
-            {gameState.deadBody ? '!! BODY REPORTED !!' : '!! EMERGENCY MEETING !!'}
+            {gameState.deadBodies?.some(b => b.reportedBy) ? '!! BODY REPORTED !!' : '!! EMERGENCY MEETING !!'}
           </p>
           <p className="text-[var(--amber)] text-center">[{formatTime(timeLeft)}]</p>
           {divider()}
@@ -889,19 +893,21 @@ export default function Game() {
 
       {currentPlayer.status === 'alive' ? (
         <>
-          {/* Dead body — only visible at the body's location */}
-          {gameState.deadBody && currentPlayer.location === gameState.deadBody.location && (
-            <div className="mb-4">
+          {/* Dead bodies — only visible at the body's location */}
+          {gameState.deadBodies?.filter(b => b.location === currentPlayer.location).map(body => (
+            <div key={body.playerId} className="mb-4">
               <p className="text-[var(--red)] glow-red text-lg">
                 {isLightsOut && currentPlayer.role !== 'impostor'
                   ? 'You trip over something. A body.'
-                  : `${gameState.players[gameState.deadBody.playerId]?.name || 'Someone'} lies motionless on the ground.`}
+                  : `${gameState.players[body.playerId]?.name || 'Someone'} lies motionless on the ground.`}
               </p>
-              <button className="term-btn term-btn-red text-lg" onClick={handleReportBody}>
-                {'> '}Report body
-              </button>
+              {!body.reportedBy && (
+                <button className="term-btn term-btn-red text-lg" onClick={handleReportBody}>
+                  {'> '}Report body
+                </button>
+              )}
             </div>
-          )}
+          ))}
 
           {/* Kill targets (impostor) */}
           {killTargets.length > 0 && (
