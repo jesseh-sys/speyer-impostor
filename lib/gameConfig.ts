@@ -62,7 +62,7 @@ export const LOCATIONS: Location[] = [
     x: 75, y: 70, connectedTo: ['music', 'mj'],
   },
   {
-    id: 'lobby', name: 'The Classroom',
+    id: 'lobby', name: 'Lobby Classroom',
     description: 'Desks arranged in a perfect circle. The clock on the wall is ticking backwards.',
     x: 40, y: 20, connectedTo: ['speyer', 'suib'],
   },
