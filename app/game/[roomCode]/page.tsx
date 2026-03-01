@@ -617,13 +617,13 @@ export default function Game() {
           </>
         ) : (
           <>
-            <pre className="text-[var(--green)] glow leading-tight">{`
+            <pre className="text-[var(--green)] glow-green leading-tight">{`
    ___
   /   \\
  | o o |
   \\_^_/
    |||`}</pre>
-            <p className="text-[var(--green)] glow text-3xl mt-4 tracking-widest">
+            <p className="text-[var(--green)] glow-green text-3xl mt-4 tracking-widest">
               INNOCENT
             </p>
             <p className="text-[var(--dim)] mt-3">Complete ALL tasks to win. Report bodies.</p>
@@ -637,8 +637,8 @@ export default function Game() {
   // ── TASK COMPLETE BANNER ─────────────────────
 
   const taskBanner = taskCompleteBanner && (
-    <div className="fixed top-0 left-0 right-0 z-30 text-center py-3" style={{ background: 'rgba(0, 255, 65, 0.15)' }}>
-      <p className="text-[var(--green)] glow text-xl tracking-widest">TASK COMPLETE</p>
+    <div className="fixed top-0 left-0 right-0 z-30 text-center py-3" style={{ background: 'rgba(51, 255, 102, 0.15)' }}>
+      <p className="text-[var(--green)] glow-green text-xl tracking-widest">TASK COMPLETE</p>
     </div>
   );
 
@@ -652,7 +652,7 @@ export default function Game() {
         {taskBanner}
         {/* Game clock during narrative */}
         {gameClockSeconds > 0 && (
-          <p className="text-[var(--amber)] text-sm text-right mb-4 opacity-60">[{formatTime(gameClockSeconds)}]</p>
+          <p className="text-[var(--green)] text-sm text-right mb-4 opacity-60">[{formatTime(gameClockSeconds)}]</p>
         )}
         <div>
           {narrative.lines.slice(0, revealedLines).map((line, i) => (
@@ -704,7 +704,7 @@ export default function Game() {
           {divider()}
           {gameState.winner === 'innocents' ? (
             <div>
-              <pre className="text-[var(--green)] glow text-center leading-tight">{`
+              <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
  ██╗███╗   ██╗███╗   ██╗ ██████╗  ██████╗███████╗███╗   ██╗████████╗███████╗
  ██║████╗  ██║████╗  ██║██╔═══██╗██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔════╝
  ██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║     █████╗  ██╔██╗ ██║   ██║   ███████╗
@@ -783,10 +783,10 @@ export default function Game() {
         <div className="mt-8">
           {/* Game clock */}
           {gameClockSeconds > 0 && (
-            <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+            <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
-          <pre className="text-[var(--green)] glow text-center leading-tight">{`
+          <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
  ╔═══════════════════════════╗
  ║   V O T E   R E S U L T  ║
  ╚═══════════════════════════╝`}</pre>
@@ -847,17 +847,17 @@ export default function Game() {
         <div className="mt-8">
           {/* Game clock */}
           {gameClockSeconds > 0 && (
-            <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+            <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
-          <pre className="text-[var(--amber)] glow-amber text-center leading-tight">{`
+          <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
  ██╗   ██╗ ██████╗ ████████╗███████╗
  ██║   ██║██╔═══██╗╚══██╔══╝██╔════╝
  ██║   ██║██║   ██║   ██║   █████╗
  ╚██╗ ██╔╝██║   ██║   ██║   ██╔══╝
   ╚████╔╝ ╚██████╔╝   ██║   ███████╗
    ╚═══╝   ╚═════╝    ╚═╝   ╚══════╝`}</pre>
-          <p className="text-[var(--amber)] text-center glow-amber">[{formatTime(timeLeft)}]</p>
+          <p className="text-[var(--green)] text-center glow-green">[{formatTime(timeLeft)}]</p>
           {/* Vote progress */}
           <p className="text-[var(--dim)] text-center text-base">Votes: {votesCast}/{totalVoters}</p>
           {divider()}
@@ -870,7 +870,7 @@ export default function Game() {
             </div>
           ) : (
             <div className="mt-4">
-              <p className="text-[var(--amber)] text-lg mb-3">Who is the impostor?</p>
+              <p className="text-[var(--green)] text-lg mb-3">Who is the impostor?</p>
               {/* Don't show self in vote targets */}
               {alivePlayers.filter(p => p.id !== playerId).map(p => (
                 <button
@@ -900,7 +900,7 @@ export default function Game() {
         <div className="mt-8">
           {/* Game clock */}
           {gameClockSeconds > 0 && (
-            <p className="text-[var(--amber)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+            <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
           {gameState.deadBodies?.some(b => b.reportedBy) ? (
@@ -913,7 +913,7 @@ export default function Game() {
  ╚═════╝  ╚═════╝ ╚═════╝    ╚═╝
     R E P O R T E D`}</pre>
           ) : (
-            <pre className="text-[var(--amber)] glow-amber text-center leading-tight">{`
+            <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
  ███╗   ███╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗
  ████╗ ████║██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝
  ██╔████╔██║█████╗  █████╗     ██║   ██║██╔██╗ ██║██║  ███╗
@@ -921,7 +921,7 @@ export default function Game() {
  ██║ ╚═╝ ██║███████╗███████╗   ██║   ██║██║ ╚████║╚██████╔╝
  ╚═╝     ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝`}</pre>
           )}
-          <p className="text-[var(--amber)] text-center">[{formatTime(timeLeft)}]</p>
+          <p className="text-[var(--green)] text-center">[{formatTime(timeLeft)}]</p>
 
           {/* Body report info */}
           {gameState.reportedBody && (
@@ -1087,7 +1087,7 @@ export default function Game() {
           </div>
           {/* Game clock — always visible */}
           {gameClockSeconds > 0 && (
-            <p className="text-[var(--amber)] glow-amber text-lg ml-2 whitespace-nowrap">
+            <p className="text-[var(--green)] glow-green text-lg ml-2 whitespace-nowrap">
               [{formatTime(gameClockSeconds)}]
             </p>
           )}
@@ -1167,7 +1167,7 @@ export default function Game() {
                 const padded = ` ${label}${label.length < 3 ? ' ' : ''}`;
                 const isCurrent = el.id === currentPlayer.location;
                 const hasTask = allMyTasks.some(t => t.location === el.id);
-                const cls = isCurrent ? 'text-[var(--green)] glow' : hasTask ? 'text-[var(--amber)]' : 'text-[var(--dim)]';
+                const cls = isCurrent ? 'text-[var(--green)] glow-green' : hasTask ? 'text-[var(--green)]' : 'text-[var(--dim)]';
                 return <span key={ei} className={cls}>{isCurrent ? `[${label}]` : padded}</span>;
               })}
             </div>
@@ -1192,7 +1192,7 @@ export default function Game() {
                 {isHere ? '>' : ' '} {task.title} — {loc?.name || '???'}
                 {isHere && ' [HERE]'}
                 {!isHere && nav && (
-                  <span className="text-[var(--amber)]"> ({nav.hops}{nav.hops === 1 ? ' room' : ' rooms'}, go: {nextLoc?.name || '???'})</span>
+                  <span className="text-[var(--green)]"> ({nav.hops}{nav.hops === 1 ? ' room' : ' rooms'}, go: {nextLoc?.name || '???'})</span>
                 )}
               </p>
             );
@@ -1209,12 +1209,12 @@ export default function Game() {
 
       {/* Sabotage banners */}
       {isLightsOut && (
-        <p className="text-[var(--amber)] glow-amber text-lg mb-2">
+        <p className="text-[var(--green)] glow-green text-lg mb-2">
           ⚡ LIGHTS OUT ⚡ — You can barely see anything.
         </p>
       )}
       {gameState.scrambled && Date.now() < gameState.scrambled.until && (
-        <p className="text-[var(--amber)] glow-amber text-lg mb-2">
+        <p className="text-[var(--green)] glow-green text-lg mb-2">
           &#9889; SCRAMBLE &#9889; — Everyone has been teleported!
         </p>
       )}
@@ -1232,7 +1232,7 @@ export default function Game() {
               )}
             </>
           ) : (
-            <p className="text-[var(--amber)] text-lg">
+            <p className="text-[var(--green)] text-lg">
               &#128274; {lockedRoomName || 'A room'} is locked down.
             </p>
           )}
@@ -1373,13 +1373,13 @@ export default function Game() {
                 <>
                   <p className="text-[var(--red)] text-lg">SABOTAGE:</p>
                   <button
-                    className="term-btn term-btn-amber text-lg"
+                    className="term-btn term-btn-green text-lg"
                     onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'lightsOut' } }))}
                   >
                     {'> '}Kill the lights (30s)
                   </button>
                   <button
-                    className="term-btn term-btn-amber text-lg"
+                    className="term-btn term-btn-green text-lg"
                     onClick={() => setShowDoorLockPicker(!showDoorLockPicker)}
                   >
                     {'> '}Lock a room (25s) {showDoorLockPicker ? '▼' : '▶'}
@@ -1391,7 +1391,7 @@ export default function Game() {
                         .map(loc => (
                           <button
                             key={loc.id}
-                            className="term-btn term-btn-amber text-base"
+                            className="term-btn term-btn-green text-base"
                             onClick={() => {
                               socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked', room: loc.id } }));
                               setShowDoorLockPicker(false);
@@ -1403,7 +1403,7 @@ export default function Game() {
                     </div>
                   )}
                   <button
-                    className="term-btn term-btn-amber text-lg"
+                    className="term-btn term-btn-green text-lg"
                     onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }))}
                   >
                     {'> '}Scramble everyone
@@ -1467,7 +1467,7 @@ export default function Game() {
               <p className="text-[var(--dim)] text-lg">MEETING [{meetingCooldownLeft}s]</p>
             ) : (
               <button
-                className="term-btn term-btn-amber text-lg"
+                className="term-btn term-btn-green text-lg"
                 onClick={handleCallMeeting}
               >
                 {'> '}Call emergency meeting
@@ -1523,7 +1523,7 @@ export default function Game() {
           {flavorLines.map((line, i) => {
             const isGrue = line.includes('grue') || line.includes('getting dark') || line.includes('flee in terror');
             return (
-              <p key={i} className={`text-base italic ${isGrue ? 'text-[var(--amber)] glow-amber' : 'text-[var(--dim)]'}`}>{line}</p>
+              <p key={i} className={`text-base italic ${isGrue ? 'text-[var(--green)] glow-green' : 'text-[var(--dim)]'}`}>{line}</p>
             );
           })}
         </div>

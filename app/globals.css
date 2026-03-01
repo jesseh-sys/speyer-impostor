@@ -7,7 +7,7 @@
   --cyan: #00ffff;
   --magenta: #ff00ff;
   --bg: #0a0a0a;
-  --dim: rgba(51, 255, 102, 0.7);
+  --dim: rgba(255, 176, 0, 0.6);
 }
 
 * {
@@ -17,7 +17,7 @@
 
 body {
   background: var(--bg);
-  color: var(--green);
+  color: var(--amber);
   overflow-x: hidden;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: unset;
@@ -59,8 +59,16 @@ input, button, textarea, select {
   z-index: 9998;
 }
 
-/* Phosphor glow */
+/* Phosphor glow — amber (default body glow) */
 .glow {
+  text-shadow:
+    0 0 5px rgba(255, 176, 0, 0.6),
+    0 0 10px rgba(255, 176, 0, 0.4),
+    0 0 20px rgba(255, 176, 0, 0.2);
+}
+
+/* Green accent glow */
+.glow-green {
   text-shadow:
     0 0 5px rgba(51, 255, 102, 0.6),
     0 0 10px rgba(51, 255, 102, 0.4),
@@ -71,12 +79,6 @@ input, button, textarea, select {
   text-shadow:
     0 0 5px rgba(255, 0, 64, 0.6),
     0 0 10px rgba(255, 0, 64, 0.4);
-}
-
-.glow-amber {
-  text-shadow:
-    0 0 5px rgba(255, 176, 0, 0.6),
-    0 0 10px rgba(255, 176, 0, 0.4);
 }
 
 /* Subtle flicker */
@@ -102,7 +104,7 @@ input, button, textarea, select {
 
 .cursor-blink {
   animation: blink 1s step-end infinite;
-  color: var(--green);
+  color: var(--amber);
 }
 
 /* Terminal button */
@@ -119,15 +121,15 @@ input, button, textarea, select {
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
-  color: var(--green);
+  color: var(--amber);
 }
 
 .term-btn:hover {
-  background: rgba(0, 255, 65, 0.1);
+  background: rgba(255, 176, 0, 0.1);
 }
 
 .term-btn:active {
-  background: rgba(0, 255, 65, 0.25);
+  background: rgba(255, 176, 0, 0.25);
 }
 
 .term-btn-red {
@@ -142,27 +144,27 @@ input, button, textarea, select {
   background: rgba(255, 0, 64, 0.25);
 }
 
-.term-btn-amber {
-  color: var(--amber);
+.term-btn-green {
+  color: var(--green);
 }
 
-.term-btn-amber:hover {
-  background: rgba(255, 176, 0, 0.1);
+.term-btn-green:hover {
+  background: rgba(51, 255, 102, 0.1);
 }
 
-.term-btn-amber:active {
-  background: rgba(255, 176, 0, 0.25);
+.term-btn-green:active {
+  background: rgba(51, 255, 102, 0.25);
 }
 
 /* Terminal input */
 .term-input {
   background: transparent;
   border: none;
-  border-bottom: 2px solid var(--green);
-  color: var(--green);
+  border-bottom: 2px solid var(--amber);
+  color: var(--amber);
   font-size: 1.3rem;
   outline: none;
-  caret-color: var(--green);
+  caret-color: var(--amber);
   padding: 8px 4px;
   width: 100%;
 }
@@ -172,8 +174,8 @@ input, button, textarea, select {
 }
 
 .term-input:focus {
-  border-bottom-color: var(--green);
-  box-shadow: 0 2px 8px rgba(0, 255, 65, 0.3);
+  border-bottom-color: var(--amber);
+  box-shadow: 0 2px 8px rgba(255, 176, 0, 0.3);
 }
 
 /* ASCII art overflow protection */
@@ -193,18 +195,18 @@ pre {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 255, 65, 0.3);
+  background: rgba(255, 176, 0, 0.3);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 255, 65, 0.5);
+  background: rgba(255, 176, 0, 0.5);
 }
 
 /* Selection */
 ::selection {
-  background: rgba(0, 255, 65, 0.3);
-  color: var(--green);
+  background: rgba(255, 176, 0, 0.3);
+  color: var(--amber);
 }
 
 /* Reduced motion */

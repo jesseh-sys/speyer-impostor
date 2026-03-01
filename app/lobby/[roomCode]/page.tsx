@@ -140,7 +140,7 @@ export default function Lobby() {
               <span className="text-[var(--cyan)]"> [HOST]</span>
             )}
             {player.id === playerId && player.id !== gameState.hostId && (
-              <span className="text-[var(--amber)]"> {'<-- YOU'}</span>
+              <span className="text-[var(--green)]"> {'<-- YOU'}</span>
             )}
           </p>
         ))}
@@ -154,7 +154,7 @@ export default function Lobby() {
       {/* Start / waiting */}
       <div className="my-6">
         {needed > 0 ? (
-          <p className="text-[var(--amber)] glow-amber text-lg">
+          <p className="text-[var(--green)] glow-green text-lg">
             NEED {needed} MORE PLAYER{needed === 1 ? '' : 'S'} TO START
           </p>
         ) : playerId === gameState.hostId ? (

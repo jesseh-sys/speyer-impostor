@@ -73,7 +73,7 @@ export default function Home() {
       {bootComplete && (
         <div>
           {/* Title */}
-          <pre className="text-[var(--green)] glow leading-tight mb-1">{`
+          <pre className="text-[var(--green)] glow-green leading-tight mb-1">{`
  ███████╗██████╗ ███████╗██╗   ██╗███████╗██████╗
  ██╔════╝██╔══██╗██╔════╝╚██╗ ██╔╝██╔════╝██╔══██╗
  ███████╗██████╔╝█████╗   ╚████╔╝ █████╗  ██████╔╝
@@ -111,7 +111,7 @@ export default function Home() {
                   className={`w-11 h-11 text-xl flex items-center justify-center rounded transition-all ${
                     selectedIcon === icon
                       ? 'bg-[var(--green)] text-black font-bold'
-                      : 'text-[var(--green)] hover:bg-[rgba(0,255,65,0.1)]'
+                      : 'text-[var(--amber)] hover:bg-[rgba(255,176,0,0.1)]'
                   }`}
                 >
                   {icon}
