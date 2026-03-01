@@ -577,7 +577,7 @@ export default function Game() {
 
   if (!gameState) {
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto mt-8">
+      <div className="min-h-screen p-4 max-w-lg mx-auto mt-4">
         <p className="text-xl glow">LOADING GAME DATA...</p>
         <span className="cursor-blink text-xl">&#9612;</span>
       </div>
@@ -586,7 +586,7 @@ export default function Game() {
 
   if (!currentPlayer) {
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto mt-8">
+      <div className="min-h-screen p-4 max-w-lg mx-auto mt-4">
         <p className="text-xl text-[var(--red)] glow-red">ERROR: PLAYER NOT FOUND</p>
         <p className="text-[var(--dim)] mt-2">Session may have expired.</p>
         <button onClick={() => window.location.href = '/'} className="term-btn mt-4 text-xl">
@@ -603,13 +603,7 @@ export default function Game() {
       <div className="max-w-sm w-full text-center">
         {currentPlayer.role === 'impostor' ? (
           <>
-            <pre className="text-[var(--red)] glow-red leading-tight">{`
-  _____
- /     \\
-| () () |
- \\ ___ /
-  |||||`}</pre>
-            <p className="text-[var(--red)] glow-red text-3xl mt-4 tracking-widest">
+            <p className="text-[var(--red)] glow-red text-4xl tracking-widest">
               IMPOSTOR
             </p>
             <p className="text-[var(--dim)] mt-3">Kill. Sabotage. Survive.</p>
@@ -617,13 +611,7 @@ export default function Game() {
           </>
         ) : (
           <>
-            <pre className="text-[var(--green)] glow-green leading-tight">{`
-   ___
-  /   \\
- | o o |
-  \\_^_/
-   |||`}</pre>
-            <p className="text-[var(--green)] glow-green text-3xl mt-4 tracking-widest">
+            <p className="text-[var(--green)] glow-green text-4xl tracking-widest">
               INNOCENT
             </p>
             <p className="text-[var(--dim)] mt-3">Complete ALL tasks to win. Report bodies.</p>
@@ -700,38 +688,22 @@ export default function Game() {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
 
-        <div className="mt-8">
+        <div className="mt-4">
           {divider()}
           {gameState.winner === 'innocents' ? (
-            <div>
-              <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
- ██╗███╗   ██╗███╗   ██╗ ██████╗  ██████╗███████╗███╗   ██╗████████╗███████╗
- ██║████╗  ██║████╗  ██║██╔═══██╗██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔════╝
- ██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║     █████╗  ██╔██╗ ██║   ██║   ███████╗
- ██║██║╚██╗██║██║╚██╗██║██║   ██║██║     ██╔══╝  ██║╚██╗██║   ██║   ╚════██║
- ██║██║ ╚████║██║ ╚████║╚██████╔╝╚██████╗███████╗██║ ╚████║   ██║   ███████║
- ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝
-                        W   I   N`}</pre>
-              <p className="text-[var(--dim)] text-center mt-2">The impostor has been stopped.</p>
-              <p className="text-[var(--dim)] text-center text-sm">The school is safe. For now.</p>
+            <div className="text-center">
+              <p className="text-[var(--green)] glow-green text-2xl tracking-widest">INNOCENTS WIN</p>
+              <p className="text-[var(--dim)] text-sm">The impostor has been stopped. The school is safe. For now.</p>
             </div>
           ) : (
-            <div>
-              <pre className="text-[var(--red)] glow-red text-center leading-tight">{`
-  ██████╗  █████╗ ███╗   ███╗███████╗
- ██╔════╝ ██╔══██╗████╗ ████║██╔════╝
- ██║  ███╗███████║██╔████╔██║█████╗
- ██║   ██║██╔══██║██║╚██╔╝██║██╔══╝
- ╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗
-  ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝
-          O   V   E   R`}</pre>
-              <p className="text-[var(--red)] text-center mt-2">The impostors win.</p>
-              <p className="text-[var(--dim)] text-center text-sm">The school has fallen. The halls are empty now.</p>
+            <div className="text-center">
+              <p className="text-[var(--red)] glow-red text-2xl tracking-widest">GAME OVER</p>
+              <p className="text-[var(--dim)] text-sm">The impostors win. The school has fallen.</p>
             </div>
           )}
           {divider()}
 
-          <p className="text-lg mt-6 mb-3">ROLES REVEALED:</p>
+          <p className="text-lg mt-3 mb-2">ROLES REVEALED:</p>
           {allPlayers.map(p => (
             <p key={p.id} className="text-lg mb-1">
               <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
@@ -743,7 +715,7 @@ export default function Game() {
             </p>
           ))}
 
-          <div className="mt-8 flex flex-col gap-2">
+          <div className="mt-4 flex flex-col gap-2">
             <button
               onClick={() => {
                 if (!restartReady) return;
@@ -780,20 +752,17 @@ export default function Game() {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
 
-        <div className="mt-8">
+        <div className="mt-4">
           {/* Game clock */}
           {gameClockSeconds > 0 && (
             <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
-          <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
- ╔═══════════════════════════╗
- ║   V O T E   R E S U L T  ║
- ╚═══════════════════════════╝`}</pre>
+          <p className="text-[var(--green)] glow-green text-center text-xl tracking-widest">VOTE RESULT</p>
           {divider()}
 
           {ejection ? (
-            <div className="mt-6 text-center">
+            <div className="mt-3 text-center">
               <p className="text-xl" style={{ color: gameState.players[ejection.playerId]?.color }}>
                 {ejection.name} was ejected.
               </p>
@@ -804,14 +773,14 @@ export default function Game() {
               </p>
             </div>
           ) : (
-            <p className="text-xl text-center mt-6 text-[var(--dim)]">
+            <p className="text-xl text-center mt-3 text-[var(--dim)]">
               No one was ejected.
             </p>
           )}
 
           {/* Vote breakdown */}
           {Object.keys(voteBreakdown).length > 0 && (
-            <div className="mt-6">
+            <div className="mt-3">
               <p className="text-[var(--dim)] text-base mb-2">VOTE BREAKDOWN:</p>
               {Object.entries(voteBreakdown).map(([targetId, voters]) => {
                 const targetName = targetId === 'skip' ? 'SKIP' : (gameState.players[targetId]?.name || '???');
@@ -826,7 +795,7 @@ export default function Game() {
             </div>
           )}
 
-          <p className="text-[var(--dim)] text-center mt-8">Returning to game...</p>
+          <p className="text-[var(--dim)] text-center mt-4">Returning to game...</p>
           <span className="cursor-blink text-xl">&#9612;</span>
         </div>
       </div>
@@ -844,19 +813,13 @@ export default function Game() {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
 
-        <div className="mt-8">
+        <div className="mt-4">
           {/* Game clock */}
           {gameClockSeconds > 0 && (
             <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
-          <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
- ██╗   ██╗ ██████╗ ████████╗███████╗
- ██║   ██║██╔═══██╗╚══██╔══╝██╔════╝
- ██║   ██║██║   ██║   ██║   █████╗
- ╚██╗ ██╔╝██║   ██║   ██║   ██╔══╝
-  ╚████╔╝ ╚██████╔╝   ██║   ███████╗
-   ╚═══╝   ╚═════╝    ╚═╝   ╚══════╝`}</pre>
+          <p className="text-[var(--green)] glow-green text-center text-2xl tracking-widest">V O T E</p>
           <p className="text-[var(--green)] text-center glow-green">[{formatTime(timeLeft)}]</p>
           {/* Vote progress */}
           <p className="text-[var(--dim)] text-center text-base">Votes: {votesCast}/{totalVoters}</p>
@@ -897,29 +860,16 @@ export default function Game() {
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col">
 
-        <div className="mt-8">
+        <div className="mt-4">
           {/* Game clock */}
           {gameClockSeconds > 0 && (
             <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
           )}
           {divider()}
           {gameState.deadBodies?.some(b => b.reportedBy) ? (
-            <pre className="text-[var(--red)] glow-red text-center leading-tight">{`
- ██████╗  ██████╗ ██████╗ ██╗   ██╗
- ██╔══██╗██╔═══██╗██╔══██╗╚██╗ ██╔╝
- ██████╔╝██║   ██║██║  ██║ ╚████╔╝
- ██╔══██╗██║   ██║██║  ██║  ╚██╔╝
- ██████╔╝╚██████╔╝██████╔╝   ██║
- ╚═════╝  ╚═════╝ ╚═════╝    ╚═╝
-    R E P O R T E D`}</pre>
+            <p className="text-[var(--red)] glow-red text-center text-2xl tracking-widest">BODY REPORTED</p>
           ) : (
-            <pre className="text-[var(--green)] glow-green text-center leading-tight">{`
- ███╗   ███╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗
- ████╗ ████║██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝
- ██╔████╔██║█████╗  █████╗     ██║   ██║██╔██╗ ██║██║  ███╗
- ██║╚██╔╝██║██╔══╝  ██╔══╝     ██║   ██║██║╚██╗██║██║   ██║
- ██║ ╚═╝ ██║███████╗███████╗   ██║   ██║██║ ╚████║╚██████╔╝
- ╚═╝     ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝`}</pre>
+            <p className="text-[var(--green)] glow-green text-center text-2xl tracking-widest">EMERGENCY MEETING</p>
           )}
           <p className="text-[var(--green)] text-center">[{formatTime(timeLeft)}]</p>
 
@@ -949,7 +899,7 @@ export default function Game() {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto my-4 min-h-[200px] max-h-[50vh]">
+        <div className="flex-1 overflow-y-auto my-2 min-h-[120px] max-h-[40vh]">
           {gameState.chat.length === 0 && (
             <p className="text-[var(--dim)]">Silence. Someone needs to talk first.</p>
           )}
@@ -1072,13 +1022,9 @@ export default function Game() {
         <div className="flex items-start justify-between">
           <div className="flex-1">
             {isImpostor ? (
-              <div>
-                <pre className="text-[var(--red)] glow-red leading-tight">{`  _____
- /     \\
-| () () |  ROLE: IMPOSTOR
- \\ ___ /
-  |||||`}</pre>
-              </div>
+              <p className="text-xl text-[var(--red)] glow-red">
+                {' '}ROLE: IMPOSTOR
+              </p>
             ) : (
               <p className="text-xl">
                 {' '}ROLE: INNOCENT {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
@@ -1093,16 +1039,7 @@ export default function Game() {
           )}
         </div>
         {currentPlayer.status === 'dead' && (
-          <div>
-            <pre className="text-[var(--red)] glow-red leading-tight">{`
-  ██████╗ ███████╗ █████╗ ██████╗
-  ██╔══██╗██╔════╝██╔══██╗██╔══██╗
-  ██║  ██║█████╗  ███████║██║  ██║
-  ██║  ██║██╔══╝  ██╔══██║██║  ██║
-  ██████╔╝███████╗██║  ██║██████╔╝
-  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝`}</pre>
-            <p className="text-[var(--dim)] text-base"> GHOST MODE — You drift unseen.</p>
-          </div>
+          <p className="text-[var(--red)] glow-red text-lg">DEAD — GHOST MODE — You drift unseen.</p>
         )}
         {/* Global task progress bar */}
         {gameState.taskProgress && (
@@ -1123,10 +1060,10 @@ export default function Game() {
       </div>
 
       {/* Location */}
-      <div className="mt-4 mb-3">
+      <div className="mt-3 mb-2">
         <h2 className="text-2xl glow">{currentLocation?.name.toUpperCase()}</h2>
         <p
-          className="text-[var(--dim)] mt-1 text-lg"
+          className="text-[var(--dim)] mt-1 text-base"
           onClick={gameState.atSecretEntrance ? handleSecretTap : undefined}
         >
           {currentLocation?.description}

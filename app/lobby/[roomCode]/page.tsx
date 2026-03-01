@@ -94,7 +94,7 @@ export default function Lobby() {
 
   if (!gameState) {
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto mt-8">
+      <div className="min-h-screen p-4 max-w-lg mx-auto mt-4">
         <p className="text-xl glow">CONNECTING TO SERVER...</p>
         <span className="cursor-blink text-xl">&#9612;</span>
       </div>
@@ -106,13 +106,13 @@ export default function Lobby() {
 
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto">
-      <div className="mt-8 mb-6">
+      <div className="mt-4 mb-3">
         <p className="text-[var(--dim)] text-sm">AFTER HOURS {'>'} GAME LOBBY</p>
-        <div className="text-[var(--dim)] mt-2">{'═'.repeat(30)}</div>
+        <div className="text-[var(--dim)] mt-1">{'═'.repeat(30)}</div>
       </div>
 
       {/* Room code */}
-      <div className="mb-6">
+      <div className="mb-3">
         <p className="text-lg">ROOM CODE:</p>
         <button
           onClick={handleCopyCode}
@@ -128,8 +128,8 @@ export default function Lobby() {
       <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
 
       {/* Players */}
-      <div className="my-6">
-        <p className="text-lg mb-3">CONNECTED PLAYERS ({players.length}/{GAME_CONFIG.MAX_PLAYERS}):</p>
+      <div className="my-3">
+        <p className="text-lg mb-1">CONNECTED PLAYERS ({players.length}/{GAME_CONFIG.MAX_PLAYERS}):</p>
         {players.map((player, i) => (
           <p key={player.id} className="text-lg mb-1">
             <span className="text-[var(--dim)]">{` ${i + 1}. `}</span>
@@ -152,7 +152,7 @@ export default function Lobby() {
       <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
 
       {/* Start / waiting */}
-      <div className="my-6">
+      <div className="my-3">
         {needed > 0 ? (
           <p className="text-[var(--green)] glow-green text-lg">
             NEED {needed} MORE PLAYER{needed === 1 ? '' : 'S'} TO START
@@ -171,20 +171,15 @@ export default function Lobby() {
       <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
 
       {/* How to play */}
-      <div className="my-6 text-[var(--dim)]">
-        <p className="text-lg text-[var(--green)] mb-2">HOW TO PLAY:</p>
-        <p className="mb-1">Innocents: Complete tasks around</p>
-        <p className="mb-1">the school to win. Report bodies.</p>
-        <p className="mb-1">Vote out the impostors.</p>
-        <p className="mb-3"></p>
-        <p className="mb-1">Impostors: Eliminate innocents.</p>
-        <p className="mb-1">Blend in. Survive votes.</p>
-        <p className="mb-3"></p>
-        <p className="text-[var(--red)]">Trust no one.</p>
+      <div className="my-3 text-[var(--dim)]">
+        <p className="text-lg text-[var(--green)] mb-1">HOW TO PLAY:</p>
+        <p className="mb-1">Innocents: Complete tasks. Report bodies. Vote out impostors.</p>
+        <p className="mb-1">Impostors: Eliminate innocents. Blend in. Survive votes.</p>
+        <p className="text-[var(--red)] mt-1">Trust no one.</p>
       </div>
 
       {/* Blinking cursor */}
-      <p className="mt-8">
+      <p className="mt-4">
         <span className="text-[var(--dim)]">{'> '}</span>
         <span className="cursor-blink">&#9612;</span>
       </p>
