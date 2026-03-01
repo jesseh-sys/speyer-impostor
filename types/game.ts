@@ -69,6 +69,7 @@ export interface GameState {
   };
   doorsLocked?: {
     until: number; // timestamp when doors unlock
+    room: string;  // which room is locked
   };
   secretRoomMethod?: 'piano' | 'shelves' | 'cases'; // which discovery is active this game
   secretRoomEntrance?: string; // which room has the hidden entrance this game

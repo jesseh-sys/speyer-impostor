@@ -16,15 +16,25 @@ import {
   getPowerupDescription,
 } from '@/lib/narrative';
 
-// ── Mini-map layout ──────────────────────────────
+// ── Mini-map layout with connection lines ──────────────────
 
-const MAP_ROWS: ({ id: string; abbr: string } | null)[][] = [
-  [{ id: 'lobby', abbr: 'LOB' }, { id: 'speyer', abbr: 'SPY' }, null],
-  [null, { id: 'suib', abbr: 'SUI' }, { id: 'meyers', abbr: 'MEY' }],
-  [{ id: 'boulevard', abbr: 'BLV' }, null, null],
-  [null, { id: 'cafeteria', abbr: 'CAF' }, { id: 'mj', abbr: 'MJ' }],
-  [{ id: 'cvs', abbr: 'CVS' }, { id: 'music', abbr: 'MUS' }, null],
-  [{ id: 'terrace', abbr: 'TER' }, null, { id: 'deard', abbr: 'DEA' }],
+const ROOM_ABBRS: Record<string, string> = {
+  lobby: 'CLS', speyer: 'LOB', boulevard: 'BLV',
+  suib: 'SUI', meyers: 'MEY', cvs: 'CVS',
+  mj: 'M.J', cafeteria: 'CAF', terrace: 'TER',
+  deard: 'DEA', music: 'MUS',
+};
+
+type MapEl = string | { id: string };
+const MAP_LINES: MapEl[][] = [
+  [{ id: 'lobby' }, '\u2500', { id: 'speyer' }, '\u2500', { id: 'boulevard' }],
+  [' \u2502    \u2502    \u2502  '],
+  [{ id: 'suib' }, '\u2500', { id: 'meyers' }, ' ', { id: 'cvs' }],
+  [' \u2502         \u2502  '],
+  [{ id: 'mj' }, ' ', { id: 'cafeteria' }, '\u2500', { id: 'terrace' }],
+  [' \u2502    \u2502       '],
+  [{ id: 'deard' }, '\u2500', { id: 'music' }, '       '],
+  ['LOB also \u2192 CAF'],
 ];
 
 // ── BFS next step ────────────────────────────────
@@ -93,6 +103,9 @@ export default function Game() {
   const pendingKillRef = useRef<string | null>(null);
   const [killPending, setKillPending] = useState(false);
   const [shieldBlockMsg, setShieldBlockMsg] = useState<string | null>(null);
+
+  // Door lock room picker
+  const [showDoorLockPicker, setShowDoorLockPicker] = useState(false);
 
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
@@ -227,14 +240,14 @@ export default function Game() {
           resultTimerRef.current = setTimeout(() => {
             setNarrative(null);
             setResultText(null);
-          }, 800);
-        }, 200);
+          }, 400);
+        }, 100);
         return () => clearTimeout(t);
       }
-      const t = setTimeout(() => setShowChoices(true), 400);
+      const t = setTimeout(() => setShowChoices(true), 200);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setRevealedLines(r => r + 1), 600);
+    const t = setTimeout(() => setRevealedLines(r => r + 1), 200);
     return () => clearTimeout(t);
   }, [narrative, revealedLines, resultText]);
 
@@ -444,7 +457,7 @@ export default function Game() {
       setNarrative(null);
       setResultText(null);
       pendingNarrativeActionRef.current = null;
-    }, 1200);
+    }, 600);
   };
 
   // Tap narrative to skip through
@@ -820,7 +833,7 @@ export default function Game() {
     );
   }
 
-  // ── VOTING (with self-vote prevention + progress) ──
+  // ── VOTING (clean vote-only screen, no chat) ──
 
   if (gameState.phase === 'voting') {
     const alivePlayers = Object.values(gameState.players).filter(p => p.status === 'alive');
@@ -829,7 +842,7 @@ export default function Game() {
     const totalVoters = alivePlayers.length;
 
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col">
+      <div className="min-h-screen p-4 max-w-lg mx-auto">
 
         <div className="mt-8">
           {/* Game clock */}
@@ -857,6 +870,7 @@ export default function Game() {
             </div>
           ) : (
             <div className="mt-4">
+              <p className="text-[var(--amber)] text-lg mb-3">Who is the impostor?</p>
               {/* Don't show self in vote targets */}
               {alivePlayers.filter(p => p.id !== playerId).map(p => (
                 <button
@@ -870,58 +884,9 @@ export default function Game() {
                   </span>
                 </button>
               ))}
-              <button
-                onClick={() => handleVote('skip')}
-                className="term-btn term-btn-amber text-lg mt-2"
-              >
-                {'> '}SKIP VOTE
-              </button>
             </div>
           )}
         </div>
-
-        {/* Chat during voting */}
-        <div className="flex-1 overflow-y-auto my-4 min-h-[100px] max-h-[30vh]">
-          {gameState.chat.map(msg => {
-            const sender = gameState.players[msg.playerId];
-            return (
-              <p key={msg.id} className="text-base mb-1">
-                <span style={{ color: sender?.color || 'var(--green)' }}>
-                  {msg.playerName}:
-                </span>
-                {' '}{msg.message}
-              </p>
-            );
-          })}
-          <div ref={chatEndRef} />
-        </div>
-
-        {currentPlayer.status === 'alive' && (
-          <div className="pb-4">
-            <div className="flex flex-wrap gap-1 mb-2">
-              {['Who?', 'Self-report?', 'Skip vote', 'They\'re sus'].map(phrase => (
-                <button
-                  key={phrase}
-                  className="text-sm px-3 py-1.5 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
-                  onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
-                >
-                  {phrase}
-                </button>
-              ))}
-            </div>
-            <form onSubmit={handleSendChat} className="flex gap-2">
-              <span className="text-[var(--dim)] text-xl mt-1">{'>'}</span>
-              <input
-                type="text"
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
-                className="term-input flex-1"
-                placeholder="speak..."
-                maxLength={200}
-              />
-            </form>
-          </div>
-        )}
       </div>
     );
   }
@@ -1004,17 +969,40 @@ export default function Game() {
 
         {currentPlayer.status === 'alive' ? (
           <div className="pb-4">
-            {/* Quick-chat buttons */}
-            <div className="flex flex-wrap gap-1 mb-2">
-              {['I saw a body', 'I was doing tasks', 'They\'re sus', 'Who?', 'Self-report?', 'Where was everyone?', 'I was with them', 'I\'m innocent'].map(phrase => (
-                <button
-                  key={phrase}
-                  className="text-sm px-3 py-1.5 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
-                  onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
-                >
-                  {phrase}
-                </button>
-              ))}
+            {/* Player accusation buttons — tap a name then SUS or SAFE */}
+            <div className="mb-2">
+              <div className="flex flex-wrap gap-1 mb-1">
+                {Object.values(gameState.players)
+                  .filter(p => p.status === 'alive' && p.id !== playerId)
+                  .map(p => (
+                    <span key={p.id} className="inline-flex gap-0.5">
+                      <button
+                        className="text-xs px-2 py-1 border border-[var(--red)] text-[var(--red)] bg-transparent"
+                        onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: `${p.name} is sus` } }))}
+                      >
+                        {p.name} SUS
+                      </button>
+                      <button
+                        className="text-xs px-2 py-1 border border-[var(--green)] text-[var(--green)] bg-transparent"
+                        onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: `${p.name} is safe` } }))}
+                      >
+                        SAFE
+                      </button>
+                    </span>
+                  ))}
+              </div>
+              {/* Quick phrases */}
+              <div className="flex flex-wrap gap-1">
+                {['I saw a body', 'I was doing tasks', 'Where was everyone?', 'Self-report?'].map(phrase => (
+                  <button
+                    key={phrase}
+                    className="text-xs px-2 py-1 border border-[var(--dim)] text-[var(--dim)] bg-transparent"
+                    onClick={() => socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: phrase } }))}
+                  >
+                    {phrase}
+                  </button>
+                ))}
+              </div>
             </div>
             <form onSubmit={handleSendChat} className="flex gap-2">
               <span className="text-[var(--dim)] text-xl mt-1">{'>'}</span>
@@ -1053,7 +1041,11 @@ export default function Game() {
     currentPlayer.powerup.until > Date.now();
 
   const bloodhoundTarget = gameState.bloodhoundTarget || null;
-  const isDoorsLocked = gameState.doorsLocked ? Date.now() < gameState.doorsLocked.until : false;
+  const doorLockActive = gameState.doorsLocked && Date.now() < gameState.doorsLocked.until;
+  const isDoorsLocked = !!doorLockActive;
+  const lockedRoomId = doorLockActive ? gameState.doorsLocked!.room : null;
+  const lockedRoomName = lockedRoomId ? gameState.locations.find(l => l.id === lockedRoomId)?.name : null;
+  const playerInLockedRoom = lockedRoomId === currentPlayer.location;
 
   // Cooldown computations
   const now = Date.now();
@@ -1164,26 +1156,23 @@ export default function Game() {
         [{showMap ? '-' : '+'}] MAP
       </button>
       {showMap && (
-        <div className="mb-4 font-mono text-base leading-relaxed">
-          {MAP_ROWS.map((row, ri) => (
-            <div key={ri} className="flex">
-              {row.map((cell, ci) => {
-                if (!cell) return <span key={ci} className="w-20 inline-block">&nbsp;</span>;
-                const isCurrent = cell.id === currentPlayer.location;
-                const hasTask = allMyTasks.some(t => t.location === cell.id);
-                return (
-                  <span
-                    key={ci}
-                    className={`w-20 inline-block ${isCurrent ? 'text-[var(--green)] glow' : hasTask ? 'text-[var(--amber)]' : 'text-[var(--dim)]'}`}
-                  >
-                    {isCurrent ? `[${cell.abbr}]` : ` ${cell.abbr} `}
-                    {hasTask && !isCurrent && '*'}
-                  </span>
-                );
+        <div className="mb-4 font-mono text-base leading-tight">
+          {MAP_LINES.map((line, li) => (
+            <div key={li} className="whitespace-pre">
+              {line.map((el, ei) => {
+                if (typeof el === 'string') {
+                  return <span key={ei} className="text-[var(--dim)]">{el}</span>;
+                }
+                const label = ROOM_ABBRS[el.id] || el.id;
+                const padded = ` ${label}${label.length < 3 ? ' ' : ''}`;
+                const isCurrent = el.id === currentPlayer.location;
+                const hasTask = allMyTasks.some(t => t.location === el.id);
+                const cls = isCurrent ? 'text-[var(--green)] glow' : hasTask ? 'text-[var(--amber)]' : 'text-[var(--dim)]';
+                return <span key={ei} className={cls}>{isCurrent ? `[${label}]` : padded}</span>;
               })}
             </div>
           ))}
-          <p className="text-[var(--dim)] text-xs mt-1">[ ] = you {'  '} * = task</p>
+          <p className="text-[var(--dim)] text-xs mt-1">[ ] = you {'  '} amber = task</p>
         </div>
       )}
 
@@ -1231,12 +1220,20 @@ export default function Game() {
       )}
       {isDoorsLocked && (
         <div className="mb-2">
-          <p className="text-[var(--red)] glow-red text-lg">
-            &#128274; DOORS LOCKED &#128274; — You can't move.
-          </p>
-          {othersHere.length > 0 && (
-            <p className="text-[var(--dim)] text-base">
-              Trapped with: {othersHere.map(p => p.name).join(', ')}
+          {playerInLockedRoom ? (
+            <>
+              <p className="text-[var(--red)] glow-red text-lg">
+                &#128274; DOORS LOCKED &#128274; — You{"'"}re trapped!
+              </p>
+              {othersHere.length > 0 && (
+                <p className="text-[var(--dim)] text-base">
+                  Trapped with: {othersHere.map(p => p.name).join(', ')}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-[var(--amber)] text-lg">
+              &#128274; {lockedRoomName || 'A room'} is locked down.
             </p>
           )}
         </div>
@@ -1383,10 +1380,28 @@ export default function Game() {
                   </button>
                   <button
                     className="term-btn term-btn-amber text-lg"
-                    onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked' } }))}
+                    onClick={() => setShowDoorLockPicker(!showDoorLockPicker)}
                   >
-                    {'> '}Lock the doors (25s)
+                    {'> '}Lock a room (25s) {showDoorLockPicker ? '▼' : '▶'}
                   </button>
+                  {showDoorLockPicker && (
+                    <div className="ml-6">
+                      {gameState.locations
+                        .filter(l => l.id !== 'secret')
+                        .map(loc => (
+                          <button
+                            key={loc.id}
+                            className="term-btn term-btn-amber text-base"
+                            onClick={() => {
+                              socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked', room: loc.id } }));
+                              setShowDoorLockPicker(false);
+                            }}
+                          >
+                            {'  > '}{loc.name}{loc.id === currentPlayer.location ? ' (you\'re here)' : ''}
+                          </button>
+                        ))}
+                    </div>
+                  )}
                   <button
                     className="term-btn term-btn-amber text-lg"
                     onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }))}
@@ -1421,14 +1436,15 @@ export default function Game() {
               .filter(locId => locId !== 'secret')
               .map(locId => {
                 const loc = gameState.locations.find(l => l.id === locId);
+                const exitBlocked = isDoorsLocked && (playerInLockedRoom || locId === lockedRoomId);
                 return (
                   <button
                     key={locId}
-                    className={`term-btn text-lg ${isDoorsLocked ? 'text-[var(--dim)]' : ''}`}
-                    onClick={() => !isDoorsLocked && handleMove(locId)}
-                    disabled={isDoorsLocked}
+                    className={`term-btn text-lg ${exitBlocked ? 'text-[var(--dim)]' : ''}`}
+                    onClick={() => !exitBlocked && handleMove(locId)}
+                    disabled={exitBlocked}
                   >
-                    {'> '}{loc?.name}{isDoorsLocked ? ' [LOCKED]' : ''}
+                    {'> '}{loc?.name}{exitBlocked ? ' [LOCKED]' : ''}
                   </button>
                 );
               })}

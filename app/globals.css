@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --green: #00ff41;
+  --green: #33ff66;
   --amber: #ffb000;
   --red: #ff0040;
   --cyan: #00ffff;
   --magenta: #ff00ff;
   --bg: #0a0a0a;
-  --dim: rgba(0, 255, 65, 0.55);
+  --dim: rgba(51, 255, 102, 0.7);
 }
 
 * {
@@ -62,9 +62,9 @@ input, button, textarea, select {
 /* Phosphor glow */
 .glow {
   text-shadow:
-    0 0 5px rgba(0, 255, 65, 0.6),
-    0 0 10px rgba(0, 255, 65, 0.4),
-    0 0 20px rgba(0, 255, 65, 0.2);
+    0 0 5px rgba(51, 255, 102, 0.6),
+    0 0 10px rgba(51, 255, 102, 0.4),
+    0 0 20px rgba(51, 255, 102, 0.2);
 }
 
 .glow-red {

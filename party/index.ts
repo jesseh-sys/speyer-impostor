@@ -347,8 +347,11 @@ export default class GameServer implements Party.Server {
 
     if (player.status !== 'alive') return;
 
-    // Locked doors: no movement allowed
-    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) return;
+    // Room-specific door lock: can't leave or enter the locked room
+    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) {
+      const lockedRoom = this.gameState.doorsLocked.room;
+      if (player.location === lockedRoom || data.location === lockedRoom) return;
+    }
 
     // Validate the destination is connected to the player's current location
     const currentLoc = this.gameState.locations.find(l => l.id === player.location);
@@ -558,11 +561,9 @@ export default class GameServer implements Party.Server {
     const targetId = data.votedForId;
     if (targetId === playerId) return;
 
-    // Validate vote target: must be 'skip' or an alive player
-    if (targetId !== 'skip') {
-      const target = this.gameState.players[targetId];
-      if (!target || target.status !== 'alive') return;
-    }
+    // Validate vote target: must be an alive player (no skip)
+    const target = this.gameState.players[targetId];
+    if (!target || target.status !== 'alive') return;
 
     this.gameState.votes[playerId] = targetId;
 
@@ -599,8 +600,13 @@ export default class GameServer implements Party.Server {
         }
       }, 30000));
     } else if (sabotageType === 'doorsLocked') {
+      const targetRoom = typeof msg.data?.room === 'string' ? msg.data.room : null;
+      if (!targetRoom) return;
+      // Validate room exists and isn't the secret room
+      const roomExists = this.gameState.locations.some(l => l.id === targetRoom && l.id !== 'secret');
+      if (!roomExists) return;
       this.lastSabotageTime = now;
-      this.gameState.doorsLocked = { until: now + 25000 };
+      this.gameState.doorsLocked = { until: now + 25000, room: targetRoom };
       this.ephemeralTimers.push(setTimeout(() => {
         if (this.gameState && this.gameState.phase === 'playing') {
           this.gameState.doorsLocked = undefined;
@@ -629,8 +635,9 @@ export default class GameServer implements Party.Server {
   handleEnterSecretRoom(msg: ClientMessage) {
     if (!this.gameState || this.gameState.phase !== 'playing') return;
 
-    // Can't enter secret room during door lock
-    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) return;
+    // Can't enter secret room if its entrance room is locked
+    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()
+        && this.gameState.doorsLocked.room === this.gameState.secretRoomEntrance) return;
 
     const player = this.gameState.players[msg.playerId];
     if (!player || player.status !== 'alive') return;
@@ -677,27 +684,18 @@ export default class GameServer implements Party.Server {
     if (!this.gameState) return;
     if (this.gameState.phase !== 'voting') return; // Prevent double-fire
 
-    // Force skip for anyone who didn't vote (prevents AFK/trolls from blocking ejections)
-    const alivePlayers = Object.values(this.gameState.players).filter(p => p.status === 'alive');
-    for (const p of alivePlayers) {
-      if (this.gameState.votes[p.id] === undefined) {
-        this.gameState.votes[p.id] = 'skip';
-      }
-    }
-
     const voteCounts: Record<string, number> = {};
 
     Object.values(this.gameState.votes).forEach(votedForId => {
       voteCounts[votedForId] = (voteCounts[votedForId] || 0) + 1;
     });
 
-    // Find player with most votes (exclude 'skip'), detect ties
+    // Find player with most votes, detect ties
     let maxVotes = 0;
     let ejectedId = '';
     let isTied = false;
 
     Object.entries(voteCounts).forEach(([id, count]) => {
-      if (id === 'skip') return;
       if (count > maxVotes) {
         maxVotes = count;
         ejectedId = id;

@@ -22,8 +22,8 @@ export const PLAYER_COLORS = [
 
 export const LOCATIONS: Location[] = [
   {
-    id: 'speyer', name: 'Speyer School',
-    description: 'The front entrance of Speyer. Hallway lights flicker. A locker slams shut somewhere in the distance.',
+    id: 'speyer', name: 'The Lobby',
+    description: 'The main lobby of the school. Hallway lights flicker. A locker slams shut somewhere in the distance.',
     x: 50, y: 20, connectedTo: ['lobby', 'cafeteria', 'boulevard', 'meyers'],
   },
   {
@@ -62,7 +62,7 @@ export const LOCATIONS: Location[] = [
     x: 75, y: 70, connectedTo: ['music', 'mj'],
   },
   {
-    id: 'lobby', name: 'Lobby Classroom',
+    id: 'lobby', name: 'The Classroom',
     description: 'Desks arranged in a perfect circle. The clock on the wall is ticking backwards.',
     x: 40, y: 20, connectedTo: ['speyer', 'suib'],
   },
@@ -105,7 +105,7 @@ export const TASKS: Omit<Task, 'id'>[] = [
 export const GAME_CONFIG = {
   MIN_PLAYERS: 4,
   MAX_PLAYERS: 15,
-  DISCUSSION_TIME: 60,
+  DISCUSSION_TIME: 30,
   VOTING_TIME: 30,
   GAME_DURATION: 600,
   TASKS_PER_PLAYER: 5,

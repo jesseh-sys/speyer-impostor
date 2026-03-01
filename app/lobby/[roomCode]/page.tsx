@@ -174,7 +174,7 @@ export default function Lobby() {
       <div className="my-6 text-[var(--dim)]">
         <p className="text-lg text-[var(--green)] mb-2">HOW TO PLAY:</p>
         <p className="mb-1">Innocents: Complete tasks around</p>
-        <p className="mb-1">Speyer to win. Report bodies.</p>
+        <p className="mb-1">the school to win. Report bodies.</p>
         <p className="mb-1">Vote out the impostors.</p>
         <p className="mb-3"></p>
         <p className="mb-1">Impostors: Eliminate innocents.</p>
