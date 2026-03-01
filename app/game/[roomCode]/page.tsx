@@ -706,7 +706,7 @@ export default function Game() {
           <p className="text-lg mt-3 mb-2">ROLES REVEALED:</p>
           {allPlayers.map(p => (
             <p key={p.id} className="text-lg mb-1">
-              <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
+              <span style={{ color: p.color }}>{p.name}</span>
               <span className="text-[var(--dim)]"> {'.'.repeat(Math.max(1, 20 - p.name.length))} </span>
               <span className={p.role === 'impostor' ? 'text-[var(--red)]' : 'text-[var(--green)]'}>
                 {p.role === 'impostor' ? 'IMPOSTOR' : 'INNOCENT'}
@@ -843,7 +843,7 @@ export default function Game() {
                 >
                   {'> '}
                   <span style={{ color: p.color }}>
-                    {p.name} ({p.icon})
+                    {p.name}
                   </span>
                 </button>
               ))}
@@ -1203,7 +1203,7 @@ export default function Game() {
               visibleOthers.map((p, i) => (
                 <span key={p.id}>
                   {i > 0 && ', '}
-                  <span style={{ color: p.color }}>{p.name} ({p.icon})</span>
+                  <span style={{ color: p.color }}>{p.name}</span>
                   {/* Co-impostor ALLY tag */}
                   {isImpostor && p.role === 'impostor' && (
                     <span className="text-[var(--red)]"> [ALLY]</span>

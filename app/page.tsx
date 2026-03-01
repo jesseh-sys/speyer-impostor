@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { PLAYER_ICONS, PLAYER_COLORS } from '@/lib/gameConfig';
+import { PLAYER_COLORS } from '@/lib/gameConfig';
 
 const BOOT_LINES = [
   'SPEYER-OS v3.14',
@@ -16,7 +16,6 @@ export default function Home() {
   const [bootStep, setBootStep] = useState(0);
   const [bootComplete, setBootComplete] = useState(false);
   const [playerName, setPlayerName] = useState('');
-  const [selectedIcon, setSelectedIcon] = useState('@');
   const [selectedColor, setSelectedColor] = useState('#00ff41');
   const [showJoin, setShowJoin] = useState(false);
   const [roomCode, setRoomCode] = useState('');
@@ -39,7 +38,6 @@ export default function Home() {
     if (!playerName.trim()) return;
     const code = generateRoomCode();
     localStorage.setItem('playerName', playerName);
-    localStorage.setItem('playerIcon', selectedIcon);
     localStorage.setItem('playerColor', selectedColor);
     router.push(`/lobby/${code}`);
   };
@@ -47,7 +45,6 @@ export default function Home() {
   const handleJoin = () => {
     if (!playerName.trim() || !roomCode.trim()) return;
     localStorage.setItem('playerName', playerName);
-    localStorage.setItem('playerIcon', selectedIcon);
     localStorage.setItem('playerColor', selectedColor);
     router.push(`/lobby/${roomCode.toUpperCase()}`);
   };
@@ -100,26 +97,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Icon selection */}
-          <div className="mb-3">
-            <p className="text-lg mb-1">CHOOSE YOUR SYMBOL:</p>
-            <div className="flex flex-wrap gap-1">
-              {PLAYER_ICONS.map(icon => (
-                <button
-                  key={icon}
-                  onClick={() => setSelectedIcon(icon)}
-                  className={`w-11 h-11 text-xl flex items-center justify-center rounded transition-all ${
-                    selectedIcon === icon
-                      ? 'bg-[var(--green)] text-black font-bold'
-                      : 'text-[var(--amber)] hover:bg-[rgba(255,176,0,0.1)]'
-                  }`}
-                >
-                  {icon}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Color selection */}
           <div className="mb-3">
             <p className="text-lg mb-1">CHOOSE YOUR COLOR:</p>
@@ -135,7 +112,7 @@ export default function Home() {
                   }`}
                   style={{ backgroundColor: color }}
                 >
-                  {selectedColor === color ? selectedIcon : ''}
+                  {selectedColor === color ? '✓' : ''}
                 </button>
               ))}
             </div>
@@ -145,7 +122,7 @@ export default function Home() {
           <div className="mb-4 text-xl">
             <span className="text-[var(--dim)]">{'> '}</span>
             <span style={{ color: selectedColor }}>
-              {playerName || '???'} ({selectedIcon})
+              {playerName || '???'}
             </span>
           </div>
 

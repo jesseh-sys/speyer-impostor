@@ -134,7 +134,7 @@ export default function Lobby() {
           <p key={player.id} className="text-lg mb-1">
             <span className="text-[var(--dim)]">{` ${i + 1}. `}</span>
             <span style={{ color: player.color }}>
-              {player.name} ({player.icon})
+              {player.name}
             </span>
             {player.id === gameState.hostId && (
               <span className="text-[var(--cyan)]"> [HOST]</span>
