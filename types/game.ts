@@ -109,6 +109,8 @@ export interface GameState {
   };
   ghostVoteAvailable?: boolean; // Dead player's one-time ghost vote status
   scrambled?: { until: number }; // Brief flash when scramble happens
+  eventLog?: Array<{ time: string; event: string }>; // DECLASSIFIED log — only sent during gameOver
+  awards?: Array<{ playerId: string; playerName: string; playerColor: string; title: string; description: string }>; // Ephemeral awards — only sent during gameOver
   cooldowns?: {
     kill?: number;      // timestamp when kill cooldown ends
     sabotage?: number;  // timestamp when sabotage cooldown ends

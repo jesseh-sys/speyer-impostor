@@ -67,6 +67,98 @@ interface ActiveNarrative {
   autoResolve?: boolean; // Skip choices, auto-show result of A then dismiss
 }
 
+// ── DECLASSIFIED Log + Awards (post-game reveal) ──────────
+
+function DeclassifiedLog({ gameState }: { gameState: GameState }) {
+  const [revealedCount, setRevealedCount] = useState(0);
+  const [showAwards, setShowAwards] = useState(false);
+  const logEntries = gameState.eventLog || [];
+  const awards = gameState.awards || [];
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setRevealedCount(0);
+    setShowAwards(false);
+
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < logEntries.length; i++) {
+      timers.push(setTimeout(() => {
+        setRevealedCount(i + 1);
+      }, 400 + i * 400));
+    }
+    // Show awards after all log entries
+    if (awards.length > 0) {
+      timers.push(setTimeout(() => {
+        setShowAwards(true);
+      }, 400 + logEntries.length * 400 + 600));
+    }
+
+    return () => timers.forEach(t => clearTimeout(t));
+  }, [logEntries.length, awards.length]);
+
+  // Auto-scroll as entries reveal
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [revealedCount, showAwards]);
+
+  const getEventColor = (event: string): string => {
+    if (event.includes('eliminated')) return 'var(--red)';
+    if (event.includes('reported') || event.includes('meeting') || event.includes('ejected') || event.includes('No one was ejected')) return 'var(--cyan)';
+    if (event.includes('WIN')) return event.includes('INNOCENTS') ? 'var(--green)' : event.includes('JESTER') ? 'var(--amber)' : 'var(--red)';
+    if (event.includes('sabotage')) return 'var(--amber)';
+    if (event.includes('shield blocked')) return 'var(--amber)';
+    if (event.includes('disguised')) return 'var(--red)';
+    if (event.includes('phantom glitch')) return '#ff00ff';
+    return 'var(--dim)';
+  };
+
+  if (logEntries.length === 0) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="text-[var(--dim)]">{'═'.repeat(36)}</div>
+      <p className="text-[var(--green)] glow-green text-lg tracking-widest">DECLASSIFIED</p>
+      <p className="text-[var(--dim)] text-sm mb-2">TERMINAL LOG — AUTHORIZED EYES ONLY</p>
+
+      <div ref={scrollRef} className="max-h-60 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--dim) transparent' }}>
+        {logEntries.slice(0, revealedCount).map((entry, i) => (
+          <p key={i} className="text-sm mb-0.5" style={{ color: getEventColor(entry.event), animation: 'fadeIn 0.3s ease-in' }}>
+            <span className="text-[var(--dim)]">{entry.time}  </span>
+            {entry.event}
+          </p>
+        ))}
+        {revealedCount < logEntries.length && (
+          <span className="cursor-blink text-base">&#9612;</span>
+        )}
+      </div>
+      <div className="text-[var(--dim)]">{'═'.repeat(36)}</div>
+
+      {showAwards && awards.length > 0 && (
+        <div className="mt-3" style={{ animation: 'fadeIn 0.5s ease-in' }}>
+          <div className="text-[var(--dim)]">{'═'.repeat(36)}</div>
+          <p className="text-[var(--amber)] text-lg tracking-widest" style={{ textShadow: '0 0 8px var(--amber)' }}>AWARDS</p>
+          <div className="text-[var(--dim)]">{'═'.repeat(36)}</div>
+
+          <div className="mt-2 space-y-3">
+            {awards.map((award, i) => (
+              <div key={i}>
+                <p className="text-base">
+                  <span className="text-[var(--amber)]" style={{ textShadow: '0 0 6px var(--amber)' }}>{'\u2605'} {award.title}</span>
+                  <span className="text-[var(--dim)]"> — </span>
+                  <span style={{ color: award.playerColor }}>{award.playerName}</span>
+                </p>
+                <p className="text-[var(--dim)] text-sm ml-4">{'"'}{award.description}{'"'}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="text-[var(--dim)] mt-2">{'═'.repeat(36)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Vote Reveal Screen (dramatic vote-by-vote animation) ──────────
 
 function VoteRevealScreen({ gameState, gameClockSeconds, divider }: {
@@ -970,6 +1062,8 @@ export default function Game() {
               </p>
             );
           })}
+
+          <DeclassifiedLog gameState={gameState} />
 
           <div className="mt-4 flex flex-col gap-2">
             <button

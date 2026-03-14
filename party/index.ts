@@ -25,8 +25,22 @@ export default class GameServer implements Party.Server {
   private lastInvestigateTime: Record<string, number> = {}; // sheriff investigate cooldown
   private lastShapeshiftTime: Record<string, number> = {}; // shapeshifter cooldown
   private phantomGlitchKillerId: string | null = null; // hidden from clients — revealed on report
+  private gameEventLog: Array<{ time: number; event: string }> = [];
+  private gameStartTime: number = 0;
+  private voteHistory: Array<{ votes: Record<string, string>; ejectedId?: string }> = [];
 
   constructor(readonly room: Party.Room) {}
+
+  private logEvent(event: string) {
+    this.gameEventLog.push({ time: Date.now(), event });
+  }
+
+  private formatEventTime(timestamp: number): string {
+    const elapsed = Math.max(0, Math.floor((timestamp - this.gameStartTime) / 1000));
+    const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+    const s = (elapsed % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
 
   onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
     console.log('Player connected:', conn.id);
@@ -377,6 +391,23 @@ export default class GameServer implements Party.Server {
       secretLoc.connectedTo = [entranceRoom];
     }
 
+    // Initialize event log and game start time
+    this.gameEventLog = [];
+    this.gameStartTime = Date.now();
+    this.voteHistory = [];
+
+    // Log game start with impostor names
+    const impostorNames = impostorIds.map(id => this.gameState!.players[id].name).join(', ');
+    const impostorLabel = impostorIds.length > 1 ? 'impostors' : 'impostor';
+    this.logEvent(`Game started. ${impostorNames} assigned as ${impostorLabel}.`);
+
+    // Log special role assignments
+    for (const p of Object.values(this.gameState.players)) {
+      if (p.specialRole) {
+        this.logEvent(`${p.name} assigned as ${p.specialRole.toUpperCase()}.`);
+      }
+    }
+
     // Initial kill cooldown — give innocents time to spread out
     const now = Date.now();
     impostorIds.forEach(id => {
@@ -494,6 +525,7 @@ export default class GameServer implements Party.Server {
     if (victim.specialRole === 'survivor' && (victim.survivorShields ?? 0) > 0) {
       victim.survivorShields = (victim.survivorShields ?? 1) - 1;
       this.lastKillTimes[playerId] = now; // Cooldown still triggers
+      this.logEvent(`${victim.name}'s shield blocked a kill.`);
       // Notify the killer
       for (const conn of this.room.getConnections()) {
         if (this.connectionToPlayer.get(conn.id) === playerId) {
@@ -511,6 +543,10 @@ export default class GameServer implements Party.Server {
 
     victim.status = 'dead';
     this.lastKillTimes[playerId] = now;
+
+    // Log kill event
+    const killLoc = this.gameState.locations.find(l => l.id === victim.location);
+    this.logEvent(`${killer.name} eliminated ${victim.name} in ${killLoc?.name || victim.location}.`);
 
     this.gameState.deadBodies.push({
       playerId: data.victimId,
@@ -559,6 +595,7 @@ export default class GameServer implements Party.Server {
       location: bodyLoc?.name || '???',
       reportedBy: reporter.name,
     };
+    this.logEvent(`${reporter.name} reported ${bodyPlayer?.name || '???'}'s body in ${bodyLoc?.name || '???'}.`);
     this.startMeeting();
   }
 
@@ -576,6 +613,7 @@ export default class GameServer implements Party.Server {
     if (now - this.lastMeetingTime < 30000) return;
 
     this.meetingsCalled.add(msg.playerId);
+    this.logEvent(`${player.name} called an emergency meeting.`);
     this.reportedBody = undefined;
     this.startMeeting();
   }
@@ -755,6 +793,7 @@ export default class GameServer implements Party.Server {
 
     if (sabotageType === 'lightsOut') {
       this.lastSabotageTime = now;
+      this.logEvent('Lights Out sabotage activated.');
       this.gameState.lightsOut = { until: now + 30000 };
       this.ephemeralTimers.push(setTimeout(() => {
         if (this.gameState && this.gameState.phase === 'playing') {
@@ -769,6 +808,7 @@ export default class GameServer implements Party.Server {
       const roomExists = this.gameState.locations.some(l => l.id === targetRoom && l.id !== 'secret');
       if (!roomExists) return;
       this.lastSabotageTime = now;
+      this.logEvent('Door Lock sabotage activated.');
       this.gameState.doorsLocked = { until: now + 25000, room: targetRoom };
       this.ephemeralTimers.push(setTimeout(() => {
         if (this.gameState && this.gameState.phase === 'playing') {
@@ -778,6 +818,7 @@ export default class GameServer implements Party.Server {
       }, 25000));
     } else if (sabotageType === 'scramble') {
       this.lastSabotageTime = now;
+      this.logEvent('Scramble sabotage activated.');
       // Randomly teleport all alive players to different rooms
       const alivePlayers = Object.values(this.gameState.players).filter(p => p.status === 'alive');
       const roomIds = this.gameState.locations.filter(l => l.id !== 'secret').map(l => l.id);
@@ -891,6 +932,7 @@ export default class GameServer implements Party.Server {
     if (killerId) {
       const killer = this.gameState.players[killerId];
       if (killer) {
+        this.logEvent(`${player.name} identified ${killer.name} via phantom glitch.`);
         sender.send(JSON.stringify({
           type: 'phantomReveal',
           data: { killerName: killer.name, killerColor: killer.color },
@@ -920,6 +962,7 @@ export default class GameServer implements Party.Server {
     if (now - lastShapeshift < 60000) return;
 
     this.lastShapeshiftTime[msg.playerId] = now;
+    this.logEvent(`${player.name} disguised as ${target.name}.`);
 
     const disguiseUntil = Date.now() + 20000;
     player.disguise = {
@@ -1002,6 +1045,19 @@ export default class GameServer implements Party.Server {
     // Store ejection info for the results phase
     this.lastEjection = ejectedPlayerId ? { playerId: ejectedPlayerId, role: ejectedRole!, specialRole: ejectedSpecialRole } : undefined;
 
+    // Track vote history for awards
+    this.voteHistory.push({
+      votes: { ...this.gameState.votes },
+      ejectedId: ejectedPlayerId,
+    });
+
+    // Log vote result
+    if (ejectedPlayerId && ejectedName) {
+      this.logEvent(`${ejectedName} was ejected.`);
+    } else {
+      this.logEvent('No one was ejected.');
+    }
+
     // Enter vote reveal phase (dramatic animation before results)
     this.gameState.phase = 'voteReveal';
     this.gameState.voteRevealData = {
@@ -1025,6 +1081,7 @@ export default class GameServer implements Party.Server {
 
           // Jester win: ejected player with specialRole 'jester' wins immediately
           if (this.gameState.players[ejectedPlayerId].specialRole === 'jester') {
+            this.logEvent(`${this.gameState.players[ejectedPlayerId].name} was ejected — JESTER WINS.`);
             this.endGame('jester');
             return;
           }
@@ -1141,6 +1198,13 @@ export default class GameServer implements Party.Server {
     this.gameState.phase = 'gameOver';
     this.gameState.winner = winner;
 
+    // Log game end
+    const durationSecs = Math.floor((Date.now() - this.gameStartTime) / 1000);
+    const durM = Math.floor(durationSecs / 60).toString().padStart(2, '0');
+    const durS = (durationSecs % 60).toString().padStart(2, '0');
+    const winnerLabel = winner === 'innocents' ? 'INNOCENTS' : winner === 'impostors' ? 'IMPOSTORS' : 'JESTER';
+    this.logEvent(`${winnerLabel} WIN. Duration: ${durM}:${durS}.`);
+
     // Survivor wins if alive at game end (regardless of which team won)
     const survivorPlayer = Object.values(this.gameState.players).find(
       p => p.specialRole === 'survivor' && p.status === 'alive'
@@ -1149,7 +1213,155 @@ export default class GameServer implements Party.Server {
       this.gameState.survivorWin = { playerId: survivorPlayer.id, name: survivorPlayer.name };
     }
 
+    // Format event log with MM:SS timestamps
+    this.gameState.eventLog = this.gameEventLog.map(e => ({
+      time: this.formatEventTime(e.time),
+      event: e.event,
+    }));
+
+    // Calculate awards
+    this.gameState.awards = this.calculateAwards();
+
     this.broadcastFiltered();
+  }
+
+  calculateAwards(): Array<{ playerId: string; playerName: string; playerColor: string; title: string; description: string }> {
+    if (!this.gameState) return [];
+    const awards: Array<{ playerId: string; playerName: string; playerColor: string; title: string; description: string }> = [];
+    const players = this.gameState.players;
+    const allPlayers = Object.values(players);
+
+    const addAward = (pid: string, title: string, description: string) => {
+      const p = players[pid];
+      if (p) awards.push({ playerId: pid, playerName: p.name, playerColor: p.color, title, description });
+    };
+
+    // DETECTIVE: First player to correctly vote for an impostor who got ejected
+    for (const round of this.voteHistory) {
+      if (round.ejectedId && players[round.ejectedId]?.role === 'impostor') {
+        // Find first voter who voted for this impostor
+        for (const [voterId, votedForId] of Object.entries(round.votes)) {
+          if (votedForId === round.ejectedId && players[voterId]?.role !== 'impostor') {
+            addAward(voterId, 'DETECTIVE', 'First to identify the threat');
+            break;
+          }
+        }
+        break; // Only first correct ejection counts
+      }
+    }
+
+    // WRONGLY ACCUSED: Innocent player who was voted out
+    for (const round of this.voteHistory) {
+      if (round.ejectedId) {
+        const ejected = players[round.ejectedId];
+        if (ejected && ejected.role === 'innocent' && ejected.specialRole !== 'jester') {
+          addAward(round.ejectedId, 'WRONGLY ACCUSED', 'Terminated without cause');
+        }
+      }
+    }
+
+    // PERFECT INFILTRATION: Impostor who was never voted against (0 votes in any meeting)
+    const impostors = allPlayers.filter(p => p.role === 'impostor');
+    for (const imp of impostors) {
+      let everVotedAgainst = false;
+      for (const round of this.voteHistory) {
+        for (const votedForId of Object.values(round.votes)) {
+          if (votedForId === imp.id) {
+            everVotedAgainst = true;
+            break;
+          }
+        }
+        if (everVotedAgainst) break;
+      }
+      if (!everVotedAgainst && this.voteHistory.length > 0) {
+        addAward(imp.id, 'PERFECT INFILTRATION', 'Zero suspicion, maximum damage');
+      }
+    }
+
+    // FIRST BLOOD: First player to be killed (from event log)
+    const firstKill = this.gameEventLog.find(e => e.event.includes(' eliminated '));
+    if (firstKill) {
+      const match = firstKill.event.match(/eliminated (.+?) in/);
+      if (match) {
+        const victimName = match[1];
+        const victim = allPlayers.find(p => p.name === victimName);
+        if (victim) addAward(victim.id, 'FIRST BLOOD', 'Wrong place, wrong time');
+      }
+    }
+
+    // TASK MASTER: Player who completed the most tasks (among those with tasks)
+    const taskPlayers = allPlayers.filter(p => p.role === 'innocent' && p.specialRole !== 'jester');
+    if (taskPlayers.length > 0) {
+      const maxTasks = Math.max(...taskPlayers.map(p => p.tasksCompleted));
+      if (maxTasks > 0) {
+        const topTasker = taskPlayers.find(p => p.tasksCompleted === maxTasks);
+        if (topTasker) addAward(topTasker.id, 'TASK MASTER', 'Most productive crew member');
+      }
+    }
+
+    // GHOST WHISPERER: Dead player whose ghost vote was in the final vote tally
+    if (this.voteHistory.length > 0) {
+      const lastRound = this.voteHistory[this.voteHistory.length - 1];
+      for (const voterId of Object.keys(lastRound.votes)) {
+        const voter = players[voterId];
+        if (voter && voter.status === 'dead' && voter.ghostVoteUsed) {
+          addAward(voterId, 'GHOST WHISPERER', 'Even death couldn\'t silence them');
+          break; // Only one award
+        }
+      }
+    }
+
+    // SERIAL KILLER: Impostor with the most kills
+    const killCounts: Record<string, number> = {};
+    for (const e of this.gameEventLog) {
+      const killMatch = e.event.match(/^(.+?) eliminated/);
+      if (killMatch) {
+        const killerName = killMatch[1];
+        const killer = allPlayers.find(p => p.name === killerName);
+        if (killer) {
+          killCounts[killer.id] = (killCounts[killer.id] || 0) + 1;
+        }
+      }
+    }
+    const impKillEntries = Object.entries(killCounts).filter(([id]) => players[id]?.role === 'impostor');
+    if (impKillEntries.length > 0) {
+      const maxKills = Math.max(...impKillEntries.map(([, c]) => c));
+      if (maxKills >= 2) {
+        const topKiller = impKillEntries.find(([, c]) => c === maxKills);
+        if (topKiller) addAward(topKiller[0], 'SERIAL KILLER', 'The darkness consumed them');
+      }
+    }
+
+    // LAST STANDING: Last innocent alive (if impostors won)
+    if (this.gameState.winner === 'impostors') {
+      const aliveInnocents = allPlayers.filter(p => p.role === 'innocent' && p.status === 'alive');
+      // If only one innocent left alive when impostors won
+      if (aliveInnocents.length > 0) {
+        // Find who was alive longest — the one still alive (or last killed before game ended)
+        // Since impostors win when they equal/outnumber innocents, there may be alive innocents
+        for (const p of aliveInnocents) {
+          addAward(p.id, 'LAST STANDING', 'Held out the longest');
+        }
+      }
+    }
+
+    // JESTER'S FOOL: Player who cast the deciding vote on the Jester
+    if (this.gameState.winner === 'jester') {
+      for (const round of this.voteHistory) {
+        if (round.ejectedId && players[round.ejectedId]?.specialRole === 'jester') {
+          // Find the last voter who voted for the jester (deciding vote)
+          const jesterVoters = Object.entries(round.votes)
+            .filter(([, votedForId]) => votedForId === round.ejectedId);
+          if (jesterVoters.length > 0) {
+            // The "deciding" vote = last one cast (they tipped the scale)
+            const lastVoter = jesterVoters[jesterVoters.length - 1];
+            addAward(lastVoter[0], 'JESTER\'S FOOL', 'Played right into their hands');
+          }
+        }
+      }
+    }
+
+    return awards;
   }
 
   handleRestartGame() {
@@ -1197,6 +1409,8 @@ export default class GameServer implements Party.Server {
     this.gameState.scrambled = undefined;
     this.gameState.phantomGlitch = undefined;
     this.gameState.survivorWin = undefined;
+    this.gameState.eventLog = undefined;
+    this.gameState.awards = undefined;
     this.gameState.locations = LOCATIONS.map(l => ({ ...l, connectedTo: [...l.connectedTo] }));
 
     // Reset server-side tracking
@@ -1213,6 +1427,9 @@ export default class GameServer implements Party.Server {
     this.lastInvestigateTime = {};
     this.lastShapeshiftTime = {};
     this.phantomGlitchKillerId = null;
+    this.gameEventLog = [];
+    this.gameStartTime = 0;
+    this.voteHistory = [];
     this.disconnectTimers.forEach(t => clearTimeout(t));
     this.disconnectTimers.clear();
   }
@@ -1252,7 +1469,7 @@ export default class GameServer implements Party.Server {
     const player = gs.players[playerId];
     if (!player) return this.maskRoles(gs);
 
-    // During game over, reveal everything
+    // During game over, reveal everything (eventLog and awards are already on gs)
     if (gs.phase === 'gameOver') return gs;
 
     const isImpostor = player.role === 'impostor';
