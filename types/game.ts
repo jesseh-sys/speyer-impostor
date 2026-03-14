@@ -1,6 +1,6 @@
 export type PlayerRole = 'innocent' | 'impostor';
 export type PlayerStatus = 'alive' | 'dead';
-export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'voting' | 'results' | 'gameOver';
+export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'voting' | 'voteReveal' | 'results' | 'gameOver';
 
 export type PowerupType = 'sixthSense' | 'radar' | 'shield' | 'shadowWalk' | 'tracker' | 'bloodhound';
 
@@ -81,6 +81,13 @@ export interface GameState {
   taskProgress?: { completed: number; total: number }; // Global task bar for innocents
   atSecretEntrance?: boolean; // Server tells client if they're at the secret entrance
   ejectionResult?: { playerId: string; role: PlayerRole; name: string } | null; // Set during results phase
+  voteRevealData?: {
+    votes: Array<{ voterId: string; voterName: string; votedForId: string; votedForName: string; isGhost: boolean }>;
+    ejectedId?: string;
+    ejectedRole?: PlayerRole;
+    ejectedName?: string;
+    noEjection: boolean;
+  };
   ghostVoteAvailable?: boolean; // Dead player's one-time ghost vote status
   scrambled?: { until: number }; // Brief flash when scramble happens
   cooldowns?: {

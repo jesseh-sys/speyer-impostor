@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
 import { GameState, Location } from '@/types/game';
@@ -65,6 +65,96 @@ interface ActiveNarrative {
   choiceA: { label: string; result: string; action: () => void };
   choiceB: { label: string; result: string; action: () => void };
   autoResolve?: boolean; // Skip choices, auto-show result of A then dismiss
+}
+
+// ── Vote Reveal Screen (dramatic vote-by-vote animation) ──────────
+
+function VoteRevealScreen({ gameState, gameClockSeconds, divider }: {
+  gameState: GameState;
+  gameClockSeconds: number;
+  divider: () => React.ReactElement;
+}) {
+  const data = gameState.voteRevealData!;
+  const [revealedCount, setRevealedCount] = useState(0);
+  const [showVerdict, setShowVerdict] = useState(false);
+  const totalVotes = data.votes.length;
+
+  useEffect(() => {
+    // Reset when entering this phase
+    setRevealedCount(0);
+    setShowVerdict(false);
+
+    // Reveal votes one at a time with 600ms delay
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < totalVotes; i++) {
+      timers.push(setTimeout(() => {
+        setRevealedCount(i + 1);
+      }, 800 + i * 600));
+    }
+    // Show verdict after all votes revealed + a dramatic pause
+    timers.push(setTimeout(() => {
+      setShowVerdict(true);
+    }, 800 + totalVotes * 600 + 1000));
+
+    return () => timers.forEach(t => clearTimeout(t));
+  }, [totalVotes]);
+
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+
+  return (
+    <div className="min-h-screen p-4 max-w-lg mx-auto">
+      <div className="mt-4">
+        {gameClockSeconds > 0 && (
+          <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
+        )}
+        {divider()}
+        <p className="text-[var(--green)] glow-green text-center text-xl tracking-widest">PROCESSING VOTES...</p>
+        <p className="text-[var(--dim)] text-center text-base mt-1">DECRYPTING BALLOTS...</p>
+        {divider()}
+
+        <div className="mt-4 space-y-1">
+          {data.votes.slice(0, revealedCount).map((vote, i) => (
+            <p key={i} className="text-base" style={{ animation: 'fadeIn 0.3s ease-in' }}>
+              <span className="text-[var(--dim)]">{'> '}</span>
+              {vote.isGhost && <span className="text-[var(--dim)]">[GHOST] </span>}
+              <span className="text-[var(--green)]">{vote.voterName}</span>
+              <span className="text-[var(--dim)]"> voted for </span>
+              {vote.votedForId === 'skip' ? (
+                <span className="text-[var(--amber)]">SKIP</span>
+              ) : (
+                <span style={{ color: gameState.players[vote.votedForId]?.color || 'var(--green)' }}>
+                  {vote.votedForName}
+                </span>
+              )}
+            </p>
+          ))}
+        </div>
+
+        {showVerdict && (
+          <div className="mt-6">
+            {divider()}
+            {data.noEjection ? (
+              <p className="text-[var(--dim)] text-center text-lg tracking-wider">
+                NO CONSENSUS REACHED. THE DARKNESS PERSISTS.
+              </p>
+            ) : data.ejectedRole === 'impostor' ? (
+              <p className="text-[var(--green)] glow-green text-center text-lg tracking-wider">
+                {data.ejectedName} WAS THE IMPOSTOR. SYSTEM INTEGRITY RESTORED.
+              </p>
+            ) : (
+              <p className="text-[var(--red)] glow-red text-center text-lg tracking-wider">
+                WRONGFUL TERMINATION. {data.ejectedName} WAS NOT THE IMPOSTOR.
+              </p>
+            )}
+          </div>
+        )}
+
+        {!showVerdict && (
+          <span className="cursor-blink text-xl mt-4 inline-block">&#9612;</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function Game() {
@@ -750,6 +840,12 @@ export default function Game() {
     );
   }
 
+  // ── VOTE REVEAL (dramatic animation) ──────────────
+
+  if (gameState.phase === 'voteReveal' && gameState.voteRevealData) {
+    return <VoteRevealScreen gameState={gameState} gameClockSeconds={gameClockSeconds} divider={divider} />;
+  }
+
   // ── RESULTS (with vote breakdown) ──────────────
 
   if (gameState.phase === 'results') {
@@ -776,19 +872,18 @@ export default function Game() {
           {divider()}
 
           {ejection ? (
-            <div className="mt-3 text-center">
-              <p className="text-xl" style={{ color: gameState.players[ejection.playerId]?.color }}>
-                {ejection.name} was ejected.
+            ejection.role === 'impostor' ? (
+              <p className="text-[var(--green)] glow-green text-center text-lg mt-3 tracking-wider">
+                {ejection.name} WAS THE IMPOSTOR. SYSTEM INTEGRITY RESTORED.
               </p>
-              <p className={`text-lg mt-2 ${
-                ejection.role === 'impostor' ? 'text-[var(--red)] glow-red' : 'text-[var(--green)]'
-              }`}>
-                {ejection.name} was {ejection.role === 'impostor' ? 'the IMPOSTOR.' : 'INNOCENT.'}
+            ) : (
+              <p className="text-[var(--red)] glow-red text-center text-lg mt-3 tracking-wider">
+                WRONGFUL TERMINATION. {ejection.name} WAS NOT THE IMPOSTOR.
               </p>
-            </div>
+            )
           ) : (
-            <p className="text-xl text-center mt-3 text-[var(--dim)]">
-              No one was ejected.
+            <p className="text-[var(--dim)] text-center text-lg mt-3 tracking-wider">
+              NO CONSENSUS REACHED. THE DARKNESS PERSISTS.
             </p>
           )}
 
@@ -862,6 +957,12 @@ export default function Game() {
                       {p.role === 'impostor' && <span className="text-[var(--red)]"> [IMP]</span>}
                     </button>
                   ))}
+                  <button
+                    onClick={() => handleVote('skip')}
+                    className="term-btn text-lg text-[var(--dim)] mt-2 opacity-60"
+                  >
+                    {'> '}<span className="text-[var(--dim)]">SKIP VOTE</span>
+                  </button>
                 </div>
               )
             ) : (
@@ -887,6 +988,12 @@ export default function Game() {
                   </span>
                 </button>
               ))}
+              <button
+                onClick={() => handleVote('skip')}
+                className="term-btn text-lg text-[var(--dim)] mt-2 opacity-60"
+              >
+                {'> '}<span className="text-[var(--dim)]">SKIP VOTE</span>
+              </button>
             </div>
           )}
         </div>

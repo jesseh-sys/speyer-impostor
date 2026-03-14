@@ -542,7 +542,7 @@ export default class GameServer implements Party.Server {
 
     if (player.status === 'dead') {
       // Dead players can ghost chat during ANY phase (playing, meeting, voting)
-      if (this.gameState.phase !== 'playing' && this.gameState.phase !== 'meeting' && this.gameState.phase !== 'voting') return;
+      if (this.gameState.phase !== 'playing' && this.gameState.phase !== 'meeting' && this.gameState.phase !== 'voting' && this.gameState.phase !== 'voteReveal') return;
       this.gameState.ghostChat.push(chatMsg);
       if (this.gameState.ghostChat.length > 50) {
         this.gameState.ghostChat = this.gameState.ghostChat.slice(-50);
@@ -571,8 +571,12 @@ export default class GameServer implements Party.Server {
 
       const targetId = data.votedForId;
       if (targetId === playerId) return;
-      const target = this.gameState.players[targetId];
-      if (!target || target.status !== 'alive') return;
+
+      // Allow "skip" or a valid alive player
+      if (targetId !== 'skip') {
+        const target = this.gameState.players[targetId];
+        if (!target || target.status !== 'alive') return;
+      }
 
       this.gameState.votes[playerId] = targetId;
       player.ghostVoteUsed = true;
@@ -591,13 +595,15 @@ export default class GameServer implements Party.Server {
     // Can't change your vote
     if (this.gameState.votes[playerId] !== undefined) return;
 
-    // Can't vote for yourself
+    // Can't vote for yourself (but CAN skip)
     const targetId = data.votedForId;
     if (targetId === playerId) return;
 
-    // Validate vote target: must be an alive player (no skip)
-    const target = this.gameState.players[targetId];
-    if (!target || target.status !== 'alive') return;
+    // Validate vote target: must be "skip" or an alive player
+    if (targetId !== 'skip') {
+      const target = this.gameState.players[targetId];
+      if (!target || target.status !== 'alive') return;
+    }
 
     this.gameState.votes[playerId] = targetId;
 
@@ -720,8 +726,11 @@ export default class GameServer implements Party.Server {
 
     const voteCounts: Record<string, number> = {};
 
+    // Skip votes ("skip") don't count toward any player's tally
     Object.values(this.gameState.votes).forEach(votedForId => {
-      voteCounts[votedForId] = (voteCounts[votedForId] || 0) + 1;
+      if (votedForId !== 'skip') {
+        voteCounts[votedForId] = (voteCounts[votedForId] || 0) + 1;
+      }
     });
 
     // Find player with most votes, detect ties
@@ -743,49 +752,88 @@ export default class GameServer implements Party.Server {
     const aliveCount = Object.values(this.gameState.players).filter(p => p.status === 'alive').length;
     const votesNeeded = Math.floor(aliveCount / 2) + 1;
 
-    // Store ejection result so the results phase can show the true role
+    // Determine ejection (but don't apply yet — wait for reveal animation)
     let ejectedPlayerId: string | undefined;
     let ejectedRole: PlayerRole | undefined;
+    let ejectedName: string | undefined;
 
     if (!isTied && ejectedId && maxVotes >= votesNeeded && this.gameState.players[ejectedId]) {
       ejectedRole = this.gameState.players[ejectedId].role;
-      this.gameState.players[ejectedId].status = 'dead';
       ejectedPlayerId = ejectedId;
+      ejectedName = this.gameState.players[ejectedId].name;
     }
 
-    // Store ejection info for the results phase (so clients can show true role)
+    // Build vote reveal data for dramatic animation
+    const voteRevealVotes: Array<{ voterId: string; voterName: string; votedForId: string; votedForName: string; isGhost: boolean }> = [];
+    for (const [voterId, votedForId] of Object.entries(this.gameState.votes)) {
+      const voter = this.gameState.players[voterId];
+      const votedForName = votedForId === 'skip' ? 'SKIP' : (this.gameState.players[votedForId]?.name || '???');
+      voteRevealVotes.push({
+        voterId,
+        voterName: voter?.name || '???',
+        votedForId,
+        votedForName,
+        isGhost: voter?.status === 'dead',
+      });
+    }
+
+    // Store ejection info for the results phase
     this.lastEjection = ejectedPlayerId ? { playerId: ejectedPlayerId, role: ejectedRole! } : undefined;
 
-    this.gameState.phase = 'results';
+    // Enter vote reveal phase (dramatic animation before results)
+    this.gameState.phase = 'voteReveal';
+    this.gameState.voteRevealData = {
+      votes: voteRevealVotes,
+      ejectedId: ejectedPlayerId,
+      ejectedRole,
+      ejectedName,
+      noEjection: !ejectedPlayerId,
+    };
     this.gameState.deadBodies = []; // Clear all bodies after meeting
 
-    // Return to playing after 5 seconds
-    const resumeTimer = setTimeout(() => {
-      if (this.gameState && this.gameState.phase === 'results') {
-        // Extend active powerups by the time spent in meeting/voting/results
-        const meetingDuration = Date.now() - this.meetingStartedAt;
-        for (const player of Object.values(this.gameState.players)) {
-          if (player.powerup && player.powerup.until > this.meetingStartedAt) {
-            player.powerup.until += meetingDuration;
-          }
+    this.broadcastFiltered();
+
+    // After 6 seconds, apply ejection and move to results phase
+    const revealTimer = setTimeout(() => {
+      if (this.gameState && this.gameState.phase === 'voteReveal') {
+        // Apply the actual ejection now
+        if (ejectedPlayerId && this.gameState.players[ejectedPlayerId]) {
+          this.gameState.players[ejectedPlayerId].status = 'dead';
         }
 
-        this.gameState.phase = 'playing';
-        this.gameState.chat = [];
-        // Note: ghostChat persists across meetings (ghosts keep their conversation)
-        // Restore the game timer display for clients
-        this.gameState.timer = {
-          duration: Math.ceil(this.gameTimeRemaining / 1000),
-          startTime: Date.now(),
-        };
-        this.startGameTimer(); // Resume game clock
-        this.checkWinCondition(); // Check before broadcast to avoid flicker
-        this.broadcastFiltered();
-      }
-    }, 5000);
-    this.meetingTimers.push(resumeTimer);
+        this.gameState.phase = 'results';
+        this.gameState.voteRevealData = undefined;
 
-    this.broadcastFiltered();
+        this.broadcastFiltered();
+
+        // Return to playing after 5 seconds
+        const resumeTimer = setTimeout(() => {
+          if (this.gameState && this.gameState.phase === 'results') {
+            // Extend active powerups by the time spent in meeting/voting/results
+            const meetingDuration = Date.now() - this.meetingStartedAt;
+            for (const player of Object.values(this.gameState.players)) {
+              if (player.powerup && player.powerup.until > this.meetingStartedAt) {
+                player.powerup.until += meetingDuration;
+              }
+            }
+
+            this.gameState.phase = 'playing';
+            this.gameState.chat = [];
+            // Note: ghostChat persists across meetings (ghosts keep their conversation)
+            // Restore the game timer display for clients
+            this.gameState.timer = {
+              duration: Math.ceil(this.gameTimeRemaining / 1000),
+              startTime: Date.now(),
+            };
+            this.startGameTimer(); // Resume game clock
+            this.checkWinCondition(); // Check before broadcast to avoid flicker
+            this.broadcastFiltered();
+          }
+        }, 5000);
+        this.meetingTimers.push(resumeTimer);
+      }
+    }, 6000);
+    this.meetingTimers.push(revealTimer);
   }
 
   checkWinCondition() {
@@ -1049,7 +1097,7 @@ export default class GameServer implements Party.Server {
 
     // Game time remaining (for non-playing phases to show game clock)
     let gameTimeRemaining: number | undefined;
-    if (['meeting', 'voting', 'results'].includes(gs.phase) && this.gameTimeRemaining > 0) {
+    if (['meeting', 'voting', 'voteReveal', 'results'].includes(gs.phase) && this.gameTimeRemaining > 0) {
       gameTimeRemaining = Math.ceil(this.gameTimeRemaining / 1000);
     }
 
@@ -1085,6 +1133,8 @@ export default class GameServer implements Party.Server {
       ejectionResult: gs.phase === 'results' && this.lastEjection
         ? { playerId: this.lastEjection.playerId, role: this.lastEjection.role, name: gs.players[this.lastEjection.playerId]?.name || '???' }
         : undefined,
+      // Vote reveal data during voteReveal phase
+      voteRevealData: gs.phase === 'voteReveal' ? gs.voteRevealData : undefined,
     };
   }
 
