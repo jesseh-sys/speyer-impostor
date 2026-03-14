@@ -203,6 +203,18 @@ export default function Game() {
   // Door lock room picker
   const [showDoorLockPicker, setShowDoorLockPicker] = useState(false);
 
+  // Sheriff investigate result overlay
+  const [investigateResult, setInvestigateResult] = useState<{ targetName: string; isImpostor: boolean } | null>(null);
+
+  // Phantom reveal overlay
+  const [phantomReveal, setPhantomReveal] = useState<{ killerName: string; killerColor: string } | null>(null);
+
+  // Survivor shield used notification
+  const [survivorShieldMsg, setSurvivorShieldMsg] = useState<string | null>(null);
+
+  // Shapeshifter target picker
+  const [showShapeshiftPicker, setShowShapeshiftPicker] = useState(false);
+
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
 
@@ -242,6 +254,19 @@ export default function Game() {
         setKillPending(false);
         setShieldBlockMsg(`Something protected ${msg.data?.victimName || 'them'}. Your attack failed.`);
         setTimeout(() => setShieldBlockMsg(null), 3000);
+      }
+      if (msg.type === 'investigateResult') {
+        setInvestigateResult({ targetName: msg.data.targetName, isImpostor: msg.data.isImpostor });
+        setTimeout(() => setInvestigateResult(null), 3000);
+      }
+      if (msg.type === 'phantomReveal') {
+        setPhantomReveal({ killerName: msg.data.killerName, killerColor: msg.data.killerColor });
+        setTimeout(() => setPhantomReveal(null), 5000);
+      }
+      if (msg.type === 'survivorShieldUsed') {
+        const remaining = msg.data?.shieldsRemaining ?? 0;
+        setSurvivorShieldMsg(`SHIELD ABSORBED — ${remaining} REMAINING`);
+        setTimeout(() => setSurvivorShieldMsg(null), 3000);
       }
     },
   });
@@ -423,11 +448,11 @@ export default function Game() {
   useEffect(() => {
     const player = gameState?.players?.[playerId];
     const hasPowerup = player?.powerup && player.powerup.until > Date.now();
-    const hasCooldown = gameState?.cooldowns?.kill || gameState?.cooldowns?.sabotage || gameState?.cooldowns?.meeting;
+    const hasCooldown = gameState?.cooldowns?.kill || gameState?.cooldowns?.sabotage || gameState?.cooldowns?.meeting || gameState?.cooldowns?.investigate || gameState?.cooldowns?.shapeshift;
     if (!hasPowerup && !hasCooldown) return;
     const interval = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(interval);
-  }, [gameState?.players?.[playerId]?.powerup?.until, gameState?.cooldowns?.kill, gameState?.cooldowns?.sabotage, gameState?.cooldowns?.meeting]);
+  }, [gameState?.players?.[playerId]?.powerup?.until, gameState?.cooldowns?.kill, gameState?.cooldowns?.sabotage, gameState?.cooldowns?.meeting, gameState?.cooldowns?.investigate, gameState?.cooldowns?.shapeshift]);
 
   // ── Derived values ────────────────────────────
   const currentPlayer = gameState ? gameState.players[playerId] : null;
@@ -725,6 +750,70 @@ export default function Game() {
             <p className="text-[var(--dim)] mt-3">Get yourself voted out to win.</p>
             <p className="text-[var(--dim)] mt-1">Trust no one — not even the truth.</p>
           </>
+        ) : currentPlayer.specialRole === 'sheriff' ? (
+          <>
+            <pre className="text-[var(--cyan)] text-xs leading-tight font-mono" style={{ textShadow: '0 0 10px var(--cyan)' }}>{`
+███████╗██╗  ██╗██████╗ ██╗███████╗
+██╔════╝██║  ██║██╔══██╗██║██╔════╝
+███████╗███████║██████╔╝██║█████╗
+╚════██║██╔══██║██╔══██╗██║██╔══╝
+███████║██║  ██║██║  ██║██║██║
+╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝
+            `.trim()}</pre>
+            <p className="text-[var(--cyan)] text-2xl tracking-widest mt-3" style={{ textShadow: '0 0 10px var(--cyan)' }}>
+              YOU ARE THE SHERIFF
+            </p>
+            <p className="text-[var(--dim)] mt-3">Investigate players to detect impostors.</p>
+            <p className="text-[var(--dim)] mt-1">Stay in the same room to scan.</p>
+          </>
+        ) : currentPlayer.specialRole === 'phantom' ? (
+          <>
+            <pre className="text-[var(--magenta,#ff00ff)] text-xs leading-tight font-mono" style={{ textShadow: '0 0 10px #ff00ff', color: '#ff00ff' }}>{`
+██████╗ ██╗  ██╗████████╗███╗   ███╗
+██╔══██╗██║  ██║╚══██╔══╝████╗ ████║
+██████╔╝███████║   ██║   ██╔████╔██║
+██╔═══╝ ██╔══██║   ██║   ██║╚██╔╝██║
+██║     ██║  ██║   ██║   ██║ ╚═╝ ██║
+╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚═╝
+            `.trim()}</pre>
+            <p className="text-2xl tracking-widest mt-3" style={{ textShadow: '0 0 10px #ff00ff', color: '#ff00ff' }}>
+              YOU ARE THE PHANTOM
+            </p>
+            <p className="text-[var(--dim)] mt-3">If killed, your ghost lingers briefly.</p>
+            <p className="text-[var(--dim)] mt-1">If reported, your killer is exposed.</p>
+          </>
+        ) : currentPlayer.specialRole === 'survivor' ? (
+          <>
+            <pre className="text-[var(--amber)] text-xs leading-tight font-mono" style={{ textShadow: '0 0 10px var(--amber)' }}>{`
+███████╗██╗   ██╗██████╗ ██╗   ██╗
+██╔════╝██║   ██║██╔══██╗██║   ██║
+███████╗██║   ██║██████╔╝██║   ██║
+╚════██║██║   ██║██╔══██╗╚██╗ ██╔╝
+███████║╚██████╔╝██║  ██║ ╚████╔╝
+╚══════╝ ╚═════╝ ╚═╝  ╚═╝  ╚═══╝
+            `.trim()}</pre>
+            <p className="text-[var(--amber)] text-2xl tracking-widest mt-3" style={{ textShadow: '0 0 10px var(--amber)' }}>
+              YOU ARE THE SURVIVOR
+            </p>
+            <p className="text-[var(--dim)] mt-3">Stay alive until the end. You have 2 shields.</p>
+            <p className="text-[var(--dim)] mt-1">You win with whoever wins — as long as you{"'"}re breathing.</p>
+          </>
+        ) : currentPlayer.specialRole === 'shapeshifter' ? (
+          <>
+            <pre className="text-[var(--red)] text-xs leading-tight font-mono" style={{ textShadow: '0 0 10px var(--red)' }}>{`
+███████╗██╗  ██╗██████╗ ████████╗
+██╔════╝██║  ██║██╔══██╗╚══██╔══╝
+███████╗███████║██████╔╝   ██║
+╚════██║██╔══██║██╔═══╝    ██║
+███████║██║  ██║██║        ██║
+╚══════╝╚═╝  ╚═╝╚═╝        ╚═╝
+            `.trim()}</pre>
+            <p className="text-[var(--red)] glow-red text-2xl tracking-widest mt-3">
+              YOU ARE THE SHAPESHIFTER
+            </p>
+            <p className="text-[var(--dim)] mt-3">Disguise yourself as other players.</p>
+            <p className="text-[var(--dim)] mt-1">Frame the innocent.</p>
+          </>
         ) : currentPlayer.role === 'impostor' ? (
           <>
             <p className="text-[var(--red)] glow-red text-4xl tracking-widest">
@@ -810,6 +899,22 @@ export default function Game() {
   if (gameState.phase === 'gameOver') {
     const allPlayers = Object.values(gameState.players);
     const jesterPlayer = allPlayers.find(p => p.specialRole === 'jester');
+    const specialRoleLabel = (p: typeof allPlayers[0]) => {
+      if (p.specialRole === 'jester') return 'JESTER';
+      if (p.specialRole === 'sheriff') return 'SHERIFF';
+      if (p.specialRole === 'phantom') return 'PHANTOM';
+      if (p.specialRole === 'shapeshifter') return 'SHAPESHIFTER';
+      if (p.specialRole === 'survivor') return 'SURVIVOR';
+      return null;
+    };
+    const specialRoleColor = (p: typeof allPlayers[0]) => {
+      if (p.specialRole === 'jester') return 'var(--amber)';
+      if (p.specialRole === 'sheriff') return 'var(--cyan)';
+      if (p.specialRole === 'phantom') return '#ff00ff';
+      if (p.specialRole === 'shapeshifter') return 'var(--red)';
+      if (p.specialRole === 'survivor') return 'var(--amber)';
+      return null;
+    };
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
 
@@ -837,23 +942,34 @@ export default function Game() {
               <p className="text-[var(--dim)] text-sm">The impostors win. The school has fallen.</p>
             </div>
           )}
+          {gameState.survivorWin && (
+            <div className="text-center mt-2">
+              <p className="text-[var(--amber)] text-lg" style={{ textShadow: '0 0 8px var(--amber)' }}>
+                SURVIVOR {gameState.survivorWin.name} ALSO WINS — STAYED ALIVE
+              </p>
+            </div>
+          )}
           {divider()}
 
           <p className="text-lg mt-3 mb-2">DECLASSIFIED — ROLES REVEALED:</p>
-          {allPlayers.map(p => (
-            <p key={p.id} className="text-lg mb-1">
-              <span style={{ color: p.color }}>{p.name}</span>
-              <span className="text-[var(--dim)]"> {'.'.repeat(Math.max(1, 20 - p.name.length))} </span>
-              {p.specialRole === 'jester' ? (
-                <span className="text-[var(--amber)]">JESTER</span>
-              ) : (
-                <span className={p.role === 'impostor' ? 'text-[var(--red)]' : 'text-[var(--green)]'}>
-                  {p.role === 'impostor' ? 'IMPOSTOR' : 'INNOCENT'}
-                </span>
-              )}
-              {p.status === 'dead' && <span className="text-[var(--dim)]"> (dead)</span>}
-            </p>
-          ))}
+          {allPlayers.map(p => {
+            const srLabel = specialRoleLabel(p);
+            const srColor = specialRoleColor(p);
+            return (
+              <p key={p.id} className="text-lg mb-1">
+                <span style={{ color: p.color }}>{p.name}</span>
+                <span className="text-[var(--dim)]"> {'.'.repeat(Math.max(1, 20 - p.name.length))} </span>
+                {srLabel ? (
+                  <span style={{ color: srColor || undefined }}>{srLabel}</span>
+                ) : (
+                  <span className={p.role === 'impostor' ? 'text-[var(--red)]' : 'text-[var(--green)]'}>
+                    {p.role === 'impostor' ? 'IMPOSTOR' : 'INNOCENT'}
+                  </span>
+                )}
+                {p.status === 'dead' && <span className="text-[var(--dim)]"> (dead)</span>}
+              </p>
+            );
+          })}
 
           <div className="mt-4 flex flex-col gap-2">
             <button
@@ -1242,13 +1358,29 @@ export default function Game() {
         <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            {isImpostor ? (
+            {currentPlayer.specialRole === 'shapeshifter' ? (
+              <p className="text-xl text-[var(--red)] glow-red">
+                {' '}ROLE: SHAPESHIFTER
+              </p>
+            ) : isImpostor ? (
               <p className="text-xl text-[var(--red)] glow-red">
                 {' '}ROLE: IMPOSTOR
               </p>
             ) : currentPlayer.specialRole === 'jester' ? (
               <p className="text-xl text-[var(--amber)]" style={{ textShadow: '0 0 8px var(--amber)' }}>
                 {' '}ROLE: JESTER
+              </p>
+            ) : currentPlayer.specialRole === 'sheriff' ? (
+              <p className="text-xl text-[var(--cyan)]" style={{ textShadow: '0 0 8px var(--cyan)' }}>
+                {' '}ROLE: SHERIFF {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
+              </p>
+            ) : currentPlayer.specialRole === 'phantom' ? (
+              <p className="text-xl" style={{ textShadow: '0 0 8px #ff00ff', color: '#ff00ff' }}>
+                {' '}ROLE: PHANTOM {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
+              </p>
+            ) : currentPlayer.specialRole === 'survivor' ? (
+              <p className="text-xl text-[var(--amber)]" style={{ textShadow: '0 0 8px var(--amber)' }}>
+                {' '}ROLE: SURVIVOR {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
               </p>
             ) : (
               <p className="text-xl">
@@ -1346,6 +1478,80 @@ export default function Game() {
         <div className="mb-4">
           <p className="text-[var(--amber)] text-base" style={{ textShadow: '0 0 6px var(--amber)' }}>
             MISSION: GET EJECTED. NO TASKS — JUST DECEPTION.
+          </p>
+        </div>
+      )}
+
+      {/* Survivor shields */}
+      {currentPlayer.specialRole === 'survivor' && currentPlayer.status === 'alive' && (
+        <div className="mb-4">
+          <p className="text-[var(--amber)] text-base" style={{ textShadow: '0 0 6px var(--amber)' }}>
+            SHIELDS: {currentPlayer.survivorShields === 2 ? '\u2588\u2588' : currentPlayer.survivorShields === 1 ? '\u2588\u2591' : '\u2591\u2591'} ({currentPlayer.survivorShields ?? 0})
+          </p>
+        </div>
+      )}
+
+      {/* Survivor shield consumed notification */}
+      {survivorShieldMsg && (
+        <p className="text-[var(--amber)] glow text-lg mb-2" style={{ textShadow: '0 0 10px var(--amber)' }}>
+          {survivorShieldMsg}
+        </p>
+      )}
+
+      {/* Shapeshifter disguise status */}
+      {currentPlayer.specialRole === 'shapeshifter' && currentPlayer.disguise && currentPlayer.disguise.until > Date.now() && (
+        <div className="mb-4">
+          <p className="text-[var(--red)] text-base glow-red">
+            DISGUISED AS <span style={{ color: currentPlayer.disguise.asColor }}>{currentPlayer.disguise.asName}</span> [{Math.max(0, Math.ceil((currentPlayer.disguise.until - Date.now()) / 1000))}s]
+          </p>
+        </div>
+      )}
+
+      {/* Phantom glitch — visible to all living players */}
+      {gameState.phantomGlitch && gameState.phantomGlitch.until > Date.now() && currentPlayer.status === 'alive' && (
+        <div className="mb-4" style={{ animation: 'glitch 0.3s infinite' }}>
+          <p className="text-lg" style={{ color: '#ff00ff', textShadow: '0 0 15px #ff00ff, 2px 0 #00ffff, -2px 0 #ff0000' }}>
+            A GLITCHING FIGURE MATERIALIZES...
+          </p>
+          <p className="text-lg" style={{ color: '#ff00ff', textShadow: '0 0 10px #ff00ff' }}>
+            {gameState.phantomGlitch.playerName}{"'"}s ghost!
+          </p>
+          {currentPlayer.location === gameState.phantomGlitch.location && (
+            <button
+              className="term-btn text-lg"
+              style={{ color: '#ff00ff', borderColor: '#ff00ff' }}
+              onClick={() => socket.send(JSON.stringify({ type: 'reportPhantom', playerId }))}
+            >
+              {'> '}REPORT GLITCH
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Sheriff investigate result overlay */}
+      {investigateResult && (
+        <div className="mb-4 p-3 border" style={{ borderColor: investigateResult.isImpostor ? 'var(--red)' : 'var(--green)' }}>
+          <p className="text-[var(--cyan)] text-base">SCANNING {investigateResult.targetName}...</p>
+          {investigateResult.isImpostor ? (
+            <p className="text-[var(--red)] glow-red text-lg tracking-wider mt-1">
+              RESULT: {'\u2588\u2588'}THREAT DETECTED{'\u2588\u2588'}
+            </p>
+          ) : (
+            <p className="text-[var(--green)] glow-green text-lg tracking-wider mt-1">
+              RESULT: CLEAR
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phantom reveal overlay (shown to reporter) */}
+      {phantomReveal && (
+        <div className="mb-4 p-3 border" style={{ borderColor: '#ff00ff' }}>
+          <p style={{ color: '#ff00ff', textShadow: '0 0 10px #ff00ff' }} className="text-lg tracking-wider">
+            GHOST ANALYSIS COMPLETE.
+          </p>
+          <p style={{ color: '#ff00ff', textShadow: '0 0 10px #ff00ff' }} className="text-lg tracking-wider mt-1">
+            KILLER IDENTIFIED: <span style={{ color: phantomReveal.killerColor }}>{phantomReveal.killerName}</span>
           </p>
         </div>
       )}
@@ -1590,6 +1796,76 @@ export default function Game() {
               ) : null}
             </div>
           )}
+
+          {/* Sheriff investigate */}
+          {currentPlayer.specialRole === 'sheriff' && currentPlayer.status === 'alive' && (() => {
+            const investigateCooldownLeft = gameState.cooldowns?.investigate ? Math.max(0, Math.ceil((gameState.cooldowns.investigate - Date.now()) / 1000)) : 0;
+            const investigateTargets = othersHere.filter(p => p.id !== playerId);
+            return (
+              <div className="mb-4">
+                {investigateCooldownLeft > 0 ? (
+                  <p className="text-[var(--dim)] text-lg">INVESTIGATE [{investigateCooldownLeft}s]</p>
+                ) : investigateTargets.length > 0 ? (
+                  <>
+                    <p className="text-[var(--cyan)] text-lg" style={{ textShadow: '0 0 6px var(--cyan)' }}>INVESTIGATE:</p>
+                    {investigateTargets.map(p => (
+                      <button
+                        key={p.id}
+                        className="term-btn text-lg"
+                        style={{ color: 'var(--cyan)' }}
+                        onClick={() => socket.send(JSON.stringify({ type: 'investigate', playerId, data: { targetId: p.id } }))}
+                      >
+                        {'> '}SCAN <span style={{ color: p.color }}>{p.name}</span>
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <p className="text-[var(--dim)] text-lg">INVESTIGATE [no targets in room]</p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Shapeshifter disguise */}
+          {currentPlayer.specialRole === 'shapeshifter' && currentPlayer.status === 'alive' && (() => {
+            const shapeshiftCooldownLeft = gameState.cooldowns?.shapeshift ? Math.max(0, Math.ceil((gameState.cooldowns.shapeshift - Date.now()) / 1000)) : 0;
+            const isDisguised = currentPlayer.disguise && currentPlayer.disguise.until > Date.now();
+            const alivePlayers = Object.values(gameState.players).filter(p => p.status === 'alive' && p.id !== playerId);
+            return (
+              <div className="mb-4">
+                {isDisguised ? (
+                  <p className="text-[var(--dim)] text-lg">SHAPESHIFT [active]</p>
+                ) : shapeshiftCooldownLeft > 0 ? (
+                  <p className="text-[var(--dim)] text-lg">SHAPESHIFT [{shapeshiftCooldownLeft}s]</p>
+                ) : (
+                  <>
+                    <button
+                      className="term-btn term-btn-red text-lg"
+                      onClick={() => setShowShapeshiftPicker(!showShapeshiftPicker)}
+                    >
+                      {'> '}SHAPESHIFT {showShapeshiftPicker ? '\u25BC' : '\u25B6'}
+                    </button>
+                    {showShapeshiftPicker && (
+                      <div className="ml-6">
+                        {alivePlayers.map(p => (
+                          <button
+                            key={p.id}
+                            className="term-btn term-btn-red text-base"
+                            onClick={() => {
+                              socket.send(JSON.stringify({ type: 'shapeshift', playerId, data: { targetId: p.id } }));
+                              setShowShapeshiftPicker(false);
+                            }}
+                          >
+                            {'  > '}Disguise as <span style={{ color: p.color }}>{p.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Tasks here (innocent, not jester) */}
           {currentPlayer.role === 'innocent' && currentPlayer.specialRole !== 'jester' && myTasksHere.length > 0 && (

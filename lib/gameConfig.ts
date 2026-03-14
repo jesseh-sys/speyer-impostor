@@ -114,10 +114,10 @@ export const GAME_CONFIG = {
 
 export const SPECIAL_ROLES: Record<SpecialRole, { name: string; description: string; minPlayers: number }> = {
   jester: { name: 'JESTER', description: 'Win by getting voted out. Fool them all.', minPlayers: 6 },
-  sheriff: { name: 'SHERIFF', description: 'Can investigate one player per meeting.', minPlayers: 6 },
-  phantom: { name: 'PHANTOM', description: 'Must complete tasks after death to win.', minPlayers: 6 },
-  shapeshifter: { name: 'SHAPESHIFTER', description: 'Can disguise as another player.', minPlayers: 6 },
-  survivor: { name: 'SURVIVOR', description: 'Win by surviving until the end.', minPlayers: 6 },
+  sheriff: { name: 'SHERIFF', description: 'Investigate players to detect impostors.', minPlayers: 6 },
+  phantom: { name: 'PHANTOM', description: 'If killed, your ghost lingers. Report it to expose the killer.', minPlayers: 7 },
+  shapeshifter: { name: 'SHAPESHIFTER', description: 'Disguise as another player. Frame the innocent.', minPlayers: 7 },
+  survivor: { name: 'SURVIVOR', description: 'Stay alive until the end. 2 shield charges.', minPlayers: 7 },
 };
 
 export const DEFAULT_ROLE_CONFIG: Record<SpecialRole, boolean> = {

@@ -22,6 +22,9 @@ export default class GameServer implements Party.Server {
   private meetingLocations: Record<string, string> = {}; // snapshot of player locations at meeting start
   private reportedBody?: { name: string; location: string; reportedBy: string };
   private lastChatTimes: Record<string, number> = {}; // rate limit: 1 msg per 2s per player
+  private lastInvestigateTime: Record<string, number> = {}; // sheriff investigate cooldown
+  private lastShapeshiftTime: Record<string, number> = {}; // shapeshifter cooldown
+  private phantomGlitchKillerId: string | null = null; // hidden from clients — revealed on report
 
   constructor(readonly room: Party.Room) {}
 
@@ -107,7 +110,7 @@ export default class GameServer implements Party.Server {
     }
 
     // Validate msg.data exists for handlers that need it
-    const needsData = ['join', 'move', 'completeTask', 'kill', 'chat', 'vote', 'sabotage', 'roleConfig'];
+    const needsData = ['join', 'move', 'completeTask', 'kill', 'chat', 'vote', 'sabotage', 'roleConfig', 'investigate', 'shapeshift'];
     if (needsData.includes(msg.type) && !msg.data) return;
 
     switch (msg.type) {
@@ -148,6 +151,15 @@ export default class GameServer implements Party.Server {
         break;
       case 'roleConfig':
         this.handleRoleConfig(msg);
+        break;
+      case 'investigate':
+        this.handleInvestigate(msg, sender);
+        break;
+      case 'reportPhantom':
+        this.handleReportPhantom(msg, sender);
+        break;
+      case 'shapeshift':
+        this.handleShapeshift(msg);
         break;
       case 'restartGame':
         this.handleRestartGame();
@@ -288,23 +300,51 @@ export default class GameServer implements Party.Server {
     });
 
     // Assign special roles based on roleConfig
-    if (playerCount >= 6 && this.gameState.roleConfig) {
+    if (this.gameState.roleConfig) {
+      // 1. Shapeshifter: pick one impostor if enabled and 7+ players
+      if (this.gameState.roleConfig.shapeshifter && playerCount >= SPECIAL_ROLES.shapeshifter.minPlayers && impostorIds.length > 0) {
+        const shapeshifterId = impostorIds[Math.floor(Math.random() * impostorIds.length)];
+        this.gameState.players[shapeshifterId].specialRole = 'shapeshifter';
+      }
+
+      // 2. Non-impostor special roles: Jester, Sheriff, Phantom, Survivor
       const nonImpostorIds = playerIds.filter(id => !impostorIds.includes(id));
-      // Shuffle for random assignment
       const shuffledNonImp = [...nonImpostorIds];
       for (let i = shuffledNonImp.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [shuffledNonImp[i], shuffledNonImp[j]] = [shuffledNonImp[j], shuffledNonImp[i]];
       }
       let assignIdx = 0;
-      // Jester: always on when enabled and enough players
-      if (this.gameState.roleConfig.jester && assignIdx < shuffledNonImp.length) {
+
+      // Jester
+      if (this.gameState.roleConfig.jester && playerCount >= SPECIAL_ROLES.jester.minPlayers && assignIdx < shuffledNonImp.length) {
         const jesterId = shuffledNonImp[assignIdx];
         this.gameState.players[jesterId].specialRole = 'jester';
         this.gameState.players[jesterId].totalTasks = 0;
         assignIdx++;
       }
-      // Other special roles will be added in Phase 4
+
+      // Sheriff
+      if (this.gameState.roleConfig.sheriff && playerCount >= SPECIAL_ROLES.sheriff.minPlayers && assignIdx < shuffledNonImp.length) {
+        const sheriffId = shuffledNonImp[assignIdx];
+        this.gameState.players[sheriffId].specialRole = 'sheriff';
+        assignIdx++;
+      }
+
+      // Phantom
+      if (this.gameState.roleConfig.phantom && playerCount >= SPECIAL_ROLES.phantom.minPlayers && assignIdx < shuffledNonImp.length) {
+        const phantomId = shuffledNonImp[assignIdx];
+        this.gameState.players[phantomId].specialRole = 'phantom';
+        assignIdx++;
+      }
+
+      // Survivor
+      if (this.gameState.roleConfig.survivor && playerCount >= SPECIAL_ROLES.survivor.minPlayers && assignIdx < shuffledNonImp.length) {
+        const survivorId = shuffledNonImp[assignIdx];
+        this.gameState.players[survivorId].specialRole = 'survivor';
+        this.gameState.players[survivorId].survivorShields = 2;
+        assignIdx++;
+      }
     }
 
     // Assign tasks to innocent players (skip Jester — they get no tasks)
@@ -450,6 +490,25 @@ export default class GameServer implements Party.Server {
       return;
     }
 
+    // Survivor shield blocks the kill
+    if (victim.specialRole === 'survivor' && (victim.survivorShields ?? 0) > 0) {
+      victim.survivorShields = (victim.survivorShields ?? 1) - 1;
+      this.lastKillTimes[playerId] = now; // Cooldown still triggers
+      // Notify the killer
+      for (const conn of this.room.getConnections()) {
+        if (this.connectionToPlayer.get(conn.id) === playerId) {
+          conn.send(JSON.stringify({ type: 'shieldBlocked', data: { victimName: victim.name } }));
+        }
+      }
+      // Notify the survivor
+      for (const conn of this.room.getConnections()) {
+        if (this.connectionToPlayer.get(conn.id) === data.victimId) {
+          conn.send(JSON.stringify({ type: 'survivorShieldUsed', data: { shieldsRemaining: victim.survivorShields } }));
+        }
+      }
+      return;
+    }
+
     victim.status = 'dead';
     this.lastKillTimes[playerId] = now;
 
@@ -457,6 +516,26 @@ export default class GameServer implements Party.Server {
       playerId: data.victimId,
       location: victim.location,
     });
+
+    // Phantom: create a glitch visible for 15 seconds
+    if (victim.specialRole === 'phantom') {
+      const glitchUntil = Date.now() + 15000;
+      this.gameState.phantomGlitch = {
+        playerId: data.victimId,
+        playerName: victim.name,
+        location: victim.location,
+        until: glitchUntil,
+      };
+      this.phantomGlitchKillerId = playerId;
+      // Auto-clear after 15 seconds
+      this.ephemeralTimers.push(setTimeout(() => {
+        if (this.gameState && this.gameState.phantomGlitch?.playerId === data.victimId) {
+          this.gameState.phantomGlitch = undefined;
+          this.phantomGlitchKillerId = null;
+          this.broadcastFiltered();
+        }
+      }, 15000));
+    }
 
     this.checkWinCondition();
   }
@@ -522,6 +601,13 @@ export default class GameServer implements Party.Server {
         }
       }
     }
+
+    // Clear active disguises and phantom glitch during meetings
+    for (const p of Object.values(this.gameState.players)) {
+      p.disguise = undefined;
+    }
+    this.gameState.phantomGlitch = undefined;
+    this.phantomGlitchKillerId = null;
 
     this.lastMeetingTime = Date.now();
     this.meetingStartedAt = Date.now();
@@ -757,6 +843,103 @@ export default class GameServer implements Party.Server {
     this.ephemeralTimers.push(setTimeout(checkPowerupExpiry, 30000));
   }
 
+  handleInvestigate(msg: ClientMessage, sender: Party.Connection) {
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+
+    const player = this.gameState.players[msg.playerId];
+    if (!player || player.specialRole !== 'sheriff' || player.status !== 'alive') return;
+
+    const targetId = msg.data?.targetId;
+    if (!targetId) return;
+    const target = this.gameState.players[targetId];
+    if (!target || target.status !== 'alive') return;
+
+    // Must be in the same room
+    if (player.location !== target.location) return;
+
+    // Cooldown: 45 seconds
+    const now = Date.now();
+    const lastInvestigate = this.lastInvestigateTime[msg.playerId] || 0;
+    if (now - lastInvestigate < 45000) return;
+
+    this.lastInvestigateTime[msg.playerId] = now;
+
+    // Jester reads as NOT impostor (they're technically innocent)
+    const isImpostor = target.role === 'impostor';
+
+    // Send result only to the sheriff
+    sender.send(JSON.stringify({
+      type: 'investigateResult',
+      data: { targetId, targetName: target.name, isImpostor },
+    }));
+  }
+
+  handleReportPhantom(msg: ClientMessage, sender: Party.Connection) {
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+
+    const player = this.gameState.players[msg.playerId];
+    if (!player || player.status !== 'alive') return;
+
+    // Must have an active phantom glitch
+    if (!this.gameState.phantomGlitch || this.gameState.phantomGlitch.until < Date.now()) return;
+
+    // Must be in the same room as the glitch
+    if (player.location !== this.gameState.phantomGlitch.location) return;
+
+    // Reveal the killer to the reporter
+    const killerId = this.phantomGlitchKillerId;
+    if (killerId) {
+      const killer = this.gameState.players[killerId];
+      if (killer) {
+        sender.send(JSON.stringify({
+          type: 'phantomReveal',
+          data: { killerName: killer.name, killerColor: killer.color },
+        }));
+      }
+    }
+
+    // Clear the phantom glitch
+    this.gameState.phantomGlitch = undefined;
+    this.phantomGlitchKillerId = null;
+  }
+
+  handleShapeshift(msg: ClientMessage) {
+    if (!this.gameState || this.gameState.phase !== 'playing') return;
+
+    const player = this.gameState.players[msg.playerId];
+    if (!player || player.specialRole !== 'shapeshifter' || player.role !== 'impostor' || player.status !== 'alive') return;
+
+    const targetId = msg.data?.targetId;
+    if (!targetId) return;
+    const target = this.gameState.players[targetId];
+    if (!target || target.status !== 'alive') return;
+
+    // Cooldown: 60 seconds
+    const now = Date.now();
+    const lastShapeshift = this.lastShapeshiftTime[msg.playerId] || 0;
+    if (now - lastShapeshift < 60000) return;
+
+    this.lastShapeshiftTime[msg.playerId] = now;
+
+    const disguiseUntil = Date.now() + 20000;
+    player.disguise = {
+      asPlayerId: targetId,
+      asName: target.name,
+      asColor: target.color,
+      until: disguiseUntil,
+    };
+
+    // Auto-clear after 20 seconds
+    const pid = msg.playerId;
+    this.ephemeralTimers.push(setTimeout(() => {
+      const p = this.gameState?.players[pid];
+      if (p?.disguise && p.disguise.until <= Date.now()) {
+        p.disguise = undefined;
+        this.broadcastFiltered();
+      }
+    }, 20000));
+  }
+
   countVotes() {
     if (!this.gameState) return;
     if (this.gameState.phase !== 'voting') return; // Prevent double-fire
@@ -957,6 +1140,15 @@ export default class GameServer implements Party.Server {
 
     this.gameState.phase = 'gameOver';
     this.gameState.winner = winner;
+
+    // Survivor wins if alive at game end (regardless of which team won)
+    const survivorPlayer = Object.values(this.gameState.players).find(
+      p => p.specialRole === 'survivor' && p.status === 'alive'
+    );
+    if (survivorPlayer) {
+      this.gameState.survivorWin = { playerId: survivorPlayer.id, name: survivorPlayer.name };
+    }
+
     this.broadcastFiltered();
   }
 
@@ -985,6 +1177,8 @@ export default class GameServer implements Party.Server {
       player.totalTasks = GAME_CONFIG.TASKS_PER_PLAYER;
       player.powerup = undefined;
       player.ghostVoteUsed = false;
+      player.disguise = undefined;
+      player.survivorShields = undefined;
     }
 
     // Reset game state
@@ -1001,6 +1195,8 @@ export default class GameServer implements Party.Server {
     this.gameState.secretRoomMethod = undefined;
     this.gameState.secretRoomEntrance = undefined;
     this.gameState.scrambled = undefined;
+    this.gameState.phantomGlitch = undefined;
+    this.gameState.survivorWin = undefined;
     this.gameState.locations = LOCATIONS.map(l => ({ ...l, connectedTo: [...l.connectedTo] }));
 
     // Reset server-side tracking
@@ -1014,6 +1210,9 @@ export default class GameServer implements Party.Server {
     this.meetingLocations = {};
     this.reportedBody = undefined;
     this.lastChatTimes = {};
+    this.lastInvestigateTime = {};
+    this.lastShapeshiftTime = {};
+    this.phantomGlitchKillerId = null;
     this.disconnectTimers.forEach(t => clearTimeout(t));
     this.disconnectTimers.clear();
   }
@@ -1070,6 +1269,7 @@ export default class GameServer implements Party.Server {
 
       if (isDead) {
         // Dead players see EVERYTHING: true roles, real locations, powerups, specialRoles
+        // Dead players see through disguises
         // (no masking needed)
       } else {
         // Roles: impostors see each other, innocents see everyone as innocent
@@ -1087,8 +1287,22 @@ export default class GameServer implements Party.Server {
           fp.location = '__shadow__';
         }
 
+        // Shapeshifter disguise: innocents see the disguised identity
+        // Impostors see through the disguise (real identity shown)
+        if (!isImpostor && p.disguise && p.disguise.until > Date.now()) {
+          fp.name = p.disguise.asName;
+          fp.color = p.disguise.asColor;
+          // Keep disguise info so client knows this is a disguised player (but don't reveal real identity)
+          fp.disguise = undefined;
+        }
+
         // Hide powerups on other players
         fp.powerup = undefined;
+      }
+
+      // Hide survivor shield count from other players (alive non-dead)
+      if (!isDead && id !== playerId) {
+        fp.survivorShields = undefined;
       }
 
       filteredPlayers[id] = fp;
@@ -1133,7 +1347,7 @@ export default class GameServer implements Party.Server {
     const taskProgress = totalTasks > 0 ? { completed: completedTasks, total: totalTasks } : undefined;
 
     // Cooldowns (only during playing phase)
-    let cooldowns: { kill?: number; sabotage?: number; meeting?: number; meetingUsed?: boolean } | undefined;
+    let cooldowns: { kill?: number; sabotage?: number; meeting?: number; meetingUsed?: boolean; investigate?: number; shapeshift?: number } | undefined;
     if (gs.phase === 'playing') {
       cooldowns = {};
       if (isImpostor) {
@@ -1145,6 +1359,16 @@ export default class GameServer implements Party.Server {
       const meetEnd = this.lastMeetingTime + 30000;
       if (meetEnd > Date.now()) cooldowns.meeting = meetEnd;
       if (this.meetingsCalled.has(playerId)) cooldowns.meetingUsed = true;
+      // Sheriff investigate cooldown
+      if (player.specialRole === 'sheriff') {
+        const invEnd = (this.lastInvestigateTime[playerId] || 0) + 45000;
+        if (invEnd > Date.now()) cooldowns.investigate = invEnd;
+      }
+      // Shapeshifter cooldown
+      if (player.specialRole === 'shapeshifter') {
+        const ssEnd = (this.lastShapeshiftTime[playerId] || 0) + 60000;
+        if (ssEnd > Date.now()) cooldowns.shapeshift = ssEnd;
+      }
     }
 
     // Game time remaining (for non-playing phases to show game clock)
@@ -1187,6 +1411,8 @@ export default class GameServer implements Party.Server {
         : undefined,
       // Vote reveal data during voteReveal phase
       voteRevealData: gs.phase === 'voteReveal' ? gs.voteRevealData : undefined,
+      // Phantom glitch: visible to all living players (don't show killerId — that's server-only)
+      phantomGlitch: gs.phantomGlitch && gs.phantomGlitch.until > Date.now() ? gs.phantomGlitch : undefined,
     };
   }
 

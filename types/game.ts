@@ -22,6 +22,13 @@ export interface Player {
     until: number; // timestamp when it expires
   };
   ghostVoteUsed?: boolean; // Dead players get ONE vote across all remaining meetings
+  disguise?: {
+    asPlayerId: string;
+    asName: string;
+    asColor: string;
+    until: number; // timestamp when disguise expires
+  };
+  survivorShields?: number; // Survivor role: starts with 2 shields
 }
 
 export interface Task {
@@ -69,7 +76,14 @@ export interface GameState {
     startTime: number;
   };
   roleConfig?: Record<SpecialRole, boolean>;
+  phantomGlitch?: {
+    playerId: string;
+    playerName: string;
+    location: string;
+    until: number;
+  };
   winner?: 'innocents' | 'impostors' | 'jester';
+  survivorWin?: { playerId: string; name: string };
   lightsOut?: {
     until: number; // timestamp when lights come back
   };
@@ -100,13 +114,15 @@ export interface GameState {
     sabotage?: number;  // timestamp when sabotage cooldown ends
     meeting?: number;   // timestamp when meeting cooldown ends
     meetingUsed?: boolean; // player already used their 1 emergency meeting
+    investigate?: number; // timestamp when sheriff investigate cooldown ends
+    shapeshift?: number;  // timestamp when shapeshifter cooldown ends
   };
   gameTimeRemaining?: number; // game clock seconds remaining (sent during meetings/voting/results)
   meetingLocations?: Record<string, string>; // playerId -> locationName at meeting start
   reportedBody?: { name: string; location: string; reportedBy: string }; // whose body triggered the meeting
 }
 
-export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame' | 'roleConfig';
+export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame' | 'roleConfig' | 'investigate' | 'reportPhantom' | 'shapeshift';
 
 export interface ClientMessage {
   type: ClientMessageType;
