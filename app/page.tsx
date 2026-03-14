@@ -105,7 +105,7 @@ export default function Home() {
       ╔══════════════════════════╗
       ║  A F T E R   H O U R S  ║
       ╚══════════════════════════╝`}</pre>
-          <p className="text-[var(--dim)] text-sm mb-1">v1.0 &copy; 2025 SPEYER INTERACTIVE</p>
+          <p className="text-[var(--dim)] text-sm mb-1">v2.0 &copy; 2025 SPEYER INTERACTIVE</p>
           <p className="text-[var(--dim)] mb-4">You are in a school. It is dark. Trust no one.</p>
 
           {/* Name input */}
