@@ -18,6 +18,7 @@ export interface Player {
     type: PowerupType;
     until: number; // timestamp when it expires
   };
+  ghostVoteUsed?: boolean; // Dead players get ONE vote across all remaining meetings
 }
 
 export interface Task {
@@ -53,6 +54,7 @@ export interface GameState {
   tasks: Task[];
   locations: Location[];
   chat: ChatMessage[];
+  ghostChat: ChatMessage[]; // Dead players chat separately
   votes: Record<string, string>; // playerId -> votedForId
   deadBodies: {
     playerId: string;
@@ -79,6 +81,7 @@ export interface GameState {
   taskProgress?: { completed: number; total: number }; // Global task bar for innocents
   atSecretEntrance?: boolean; // Server tells client if they're at the secret entrance
   ejectionResult?: { playerId: string; role: PlayerRole; name: string } | null; // Set during results phase
+  ghostVoteAvailable?: boolean; // Dead player's one-time ghost vote status
   scrambled?: { until: number }; // Brief flash when scramble happens
   cooldowns?: {
     kill?: number;      // timestamp when kill cooldown ends

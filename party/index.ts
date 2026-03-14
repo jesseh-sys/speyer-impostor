@@ -38,6 +38,7 @@ export default class GameServer implements Party.Server {
         tasks: [],
         locations: LOCATIONS.map(l => ({ ...l, connectedTo: [...l.connectedTo] })),
         chat: [],
+        ghostChat: [],
         votes: {},
         deadBodies: [],
       };
@@ -366,6 +367,7 @@ export default class GameServer implements Party.Server {
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
     if (!player || player.role !== 'innocent') return;
+    // Dead innocents CAN complete tasks (ghost tasks count toward team progress)
 
     // Validate the task exists, belongs to this player, and they're at the right location
     const task = this.gameState.tasks.find(t => t.id === data.taskId);
@@ -518,29 +520,37 @@ export default class GameServer implements Party.Server {
 
   handleChat(msg: ClientMessage) {
     if (!this.gameState) return;
-    // Only allow chat during meeting/voting phases
-    if (this.gameState.phase !== 'meeting' && this.gameState.phase !== 'voting') return;
 
     const player = this.gameState.players[msg.playerId];
+    if (!player) return;
 
-    if (player && player.status === 'alive') {
-      const message = typeof msg.data.message === 'string' ? msg.data.message.slice(0, 200) : '';
-      if (!message) return;
+    const message = typeof msg.data.message === 'string' ? msg.data.message.slice(0, 200) : '';
+    if (!message) return;
 
-      // Rate limit: 1 message per 2 seconds per player
-      const now = Date.now();
-      if (now - (this.lastChatTimes[msg.playerId] || 0) < 2000) return;
-      this.lastChatTimes[msg.playerId] = now;
+    // Rate limit: 1 message per 2 seconds per player
+    const now = Date.now();
+    if (now - (this.lastChatTimes[msg.playerId] || 0) < 2000) return;
+    this.lastChatTimes[msg.playerId] = now;
 
-      this.gameState.chat.push({
-        id: `${Date.now()}-${msg.playerId}`,
-        playerId: msg.playerId,
-        playerName: player.name,
-        message,
-        timestamp: Date.now(),
-      });
+    const chatMsg = {
+      id: `${Date.now()}-${msg.playerId}`,
+      playerId: msg.playerId,
+      playerName: player.name,
+      message,
+      timestamp: Date.now(),
+    };
 
-      // Keep only last 50 messages
+    if (player.status === 'dead') {
+      // Dead players can ghost chat during ANY phase (playing, meeting, voting)
+      if (this.gameState.phase !== 'playing' && this.gameState.phase !== 'meeting' && this.gameState.phase !== 'voting') return;
+      this.gameState.ghostChat.push(chatMsg);
+      if (this.gameState.ghostChat.length > 50) {
+        this.gameState.ghostChat = this.gameState.ghostChat.slice(-50);
+      }
+    } else {
+      // Living players can only chat during meeting/voting
+      if (this.gameState.phase !== 'meeting' && this.gameState.phase !== 'voting') return;
+      this.gameState.chat.push(chatMsg);
       if (this.gameState.chat.length > 50) {
         this.gameState.chat = this.gameState.chat.slice(-50);
       }
@@ -552,7 +562,31 @@ export default class GameServer implements Party.Server {
 
     const { playerId, data } = msg;
     const player = this.gameState.players[playerId];
-    if (!player || player.status !== 'alive') return;
+    if (!player) return;
+
+    // Dead players: allow ONE ghost vote total across all meetings
+    if (player.status === 'dead') {
+      if (player.ghostVoteUsed) return; // Already used their one ghost vote
+      if (this.gameState.votes[playerId] !== undefined) return;
+
+      const targetId = data.votedForId;
+      if (targetId === playerId) return;
+      const target = this.gameState.players[targetId];
+      if (!target || target.status !== 'alive') return;
+
+      this.gameState.votes[playerId] = targetId;
+      player.ghostVoteUsed = true;
+
+      // Check if all alive + ghost-vote-available players have voted
+      const allAlive = Object.values(this.gameState.players).filter(p => p.status === 'alive');
+      if (allAlive.every(p => this.gameState!.votes[p.id] !== undefined)) {
+        this.countVotes();
+      }
+      return;
+    }
+
+    // Living players
+    if (player.status !== 'alive') return;
 
     // Can't change your vote
     if (this.gameState.votes[playerId] !== undefined) return;
@@ -738,6 +772,7 @@ export default class GameServer implements Party.Server {
 
         this.gameState.phase = 'playing';
         this.gameState.chat = [];
+        // Note: ghostChat persists across meetings (ghosts keep their conversation)
         // Restore the game timer display for clients
         this.gameState.timer = {
           duration: Math.ceil(this.gameTimeRemaining / 1000),
@@ -853,12 +888,14 @@ export default class GameServer implements Party.Server {
       player.tasksCompleted = 0;
       player.totalTasks = GAME_CONFIG.TASKS_PER_PLAYER;
       player.powerup = undefined;
+      player.ghostVoteUsed = false;
     }
 
     // Reset game state
     this.gameState.phase = 'lobby';
     this.gameState.tasks = [];
     this.gameState.chat = [];
+    this.gameState.ghostChat = [];
     this.gameState.votes = {};
     this.gameState.deadBodies = [];
     this.gameState.timer = undefined;
@@ -909,7 +946,7 @@ export default class GameServer implements Party.Server {
     for (const [id, p] of Object.entries(gs.players)) {
       filteredPlayers[id] = { ...p, role: 'innocent', powerup: undefined };
     }
-    return { ...gs, players: filteredPlayers, tasks: [] };
+    return { ...gs, players: filteredPlayers, tasks: [], ghostChat: [] };
   }
 
   // Filter state for a specific player — hide what they shouldn't see
@@ -924,6 +961,7 @@ export default class GameServer implements Party.Server {
     if (gs.phase === 'gameOver') return gs;
 
     const isImpostor = player.role === 'impostor';
+    const isDead = player.status === 'dead';
 
     // Filter players — hide roles and powerups of others
     const filteredPlayers: Record<string, Player> = {};
@@ -934,20 +972,25 @@ export default class GameServer implements Party.Server {
       }
       const fp = { ...p };
 
-      // Roles: impostors see each other, innocents see everyone as innocent
-      if (!isImpostor) {
-        fp.role = 'innocent';
-      }
+      if (isDead) {
+        // Dead players see EVERYTHING: true roles, real locations, powerups
+        // (no masking needed)
+      } else {
+        // Roles: impostors see each other, innocents see everyone as innocent
+        if (!isImpostor) {
+          fp.role = 'innocent';
+        }
 
-      // Shadow Walk: hide shadow-walking impostors from innocent players
-      // by spoofing their location so they don't appear in "You see:" lists
-      if (!isImpostor && p.role === 'impostor' &&
-          p.powerup?.type === 'shadowWalk' && p.powerup.until > Date.now()) {
-        fp.location = '__shadow__';
-      }
+        // Shadow Walk: hide shadow-walking impostors from innocent players
+        // by spoofing their location so they don't appear in "You see:" lists
+        if (!isImpostor && p.role === 'impostor' &&
+            p.powerup?.type === 'shadowWalk' && p.powerup.until > Date.now()) {
+          fp.location = '__shadow__';
+        }
 
-      // Hide powerups on other players
-      fp.powerup = undefined;
+        // Hide powerups on other players
+        fp.powerup = undefined;
+      }
 
       filteredPlayers[id] = fp;
     }
@@ -1011,9 +1054,9 @@ export default class GameServer implements Party.Server {
     }
 
     // Strip secret room's connectedTo to prevent anti-cheat leak
-    // But keep it if the player is IN the secret room (so ghosts can leave)
+    // Dead players can see the secret room entrance; alive players only if they're in it
     const filteredLocations = gs.locations.map(l =>
-      l.id === 'secret' ? { ...l, connectedTo: player.location === 'secret' ? l.connectedTo : [] } : l
+      l.id === 'secret' ? { ...l, connectedTo: (isDead || player.location === 'secret') ? l.connectedTo : [] } : l
     );
 
     return {
@@ -1021,15 +1064,19 @@ export default class GameServer implements Party.Server {
       players: filteredPlayers,
       tasks: filteredTasks,
       locations: filteredLocations,
+      // Ghost chat: dead players see it, living players get empty array
+      ghostChat: isDead ? gs.ghostChat : [],
       sixthSenseWarning: sixthSenseWarning || undefined,
       bloodhoundTarget,
       taskProgress,
       cooldowns,
       gameTimeRemaining,
-      // Strip secret room internals — client only needs to know if they're at the entrance
-      secretRoomMethod: player.location === gs.secretRoomEntrance ? gs.secretRoomMethod : undefined,
-      secretRoomEntrance: undefined, // Never send the entrance room ID
+      // Dead players see secret room info; alive players only at entrance
+      secretRoomMethod: isDead ? gs.secretRoomMethod : (player.location === gs.secretRoomEntrance ? gs.secretRoomMethod : undefined),
+      secretRoomEntrance: isDead ? gs.secretRoomEntrance : undefined,
       atSecretEntrance: player.location === gs.secretRoomEntrance || undefined,
+      // Ghost vote availability
+      ghostVoteAvailable: isDead ? !player.ghostVoteUsed : undefined,
       // Player locations at meeting start (shown during meeting/voting)
       meetingLocations: (gs.phase === 'meeting' || gs.phase === 'voting') ? this.meetingLocations : undefined,
       // Body report info (shown during meeting/voting)

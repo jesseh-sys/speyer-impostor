@@ -74,8 +74,10 @@ export default function Game() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerId, setPlayerId] = useState('');
   const [chatMessage, setChatMessage] = useState('');
+  const [ghostChatMessage, setGhostChatMessage] = useState('');
   const [timeLeft, setTimeLeft] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const ghostChatEndRef = useRef<HTMLDivElement>(null);
 
   // Narrative state
   const [narrative, setNarrative] = useState<ActiveNarrative | null>(null);
@@ -225,6 +227,10 @@ export default function Game() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [gameState?.chat?.length]);
+
+  useEffect(() => {
+    ghostChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [gameState?.ghostChat?.length]);
 
   // ── Narrative line reveal ─────────────────────
 
@@ -567,6 +573,14 @@ export default function Game() {
     setChatMessage('');
   };
 
+  const handleSendGhostChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ghostChatMessage.trim()) return;
+
+    socket.send(JSON.stringify({ type: 'chat', playerId, data: { message: ghostChatMessage } }));
+    setGhostChatMessage('');
+  };
+
   const handleVote = (votedForId: string) => {
     socket.send(JSON.stringify({ type: 'vote', playerId, data: { votedForId } }));
   };
@@ -826,7 +840,33 @@ export default function Game() {
           {divider()}
 
           {currentPlayer.status === 'dead' ? (
-            <p className="text-[var(--dim)] mt-4">(You are dead. Observing.)</p>
+            gameState.ghostVoteAvailable ? (
+              hasVoted ? (
+                <div className="mt-4">
+                  <p className="text-[var(--dim)]">GHOST VOTE CAST. Waiting for others... ({votesCast}/{totalVoters})</p>
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <p className="text-[var(--red)] glow-red text-lg mb-1">GHOST VOTE</p>
+                  <p className="text-[var(--dim)] text-base mb-3">You only get ONE. Choose wisely.</p>
+                  {alivePlayers.filter(p => p.id !== playerId).map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => handleVote(p.id)}
+                      className="term-btn text-lg text-[var(--dim)]"
+                    >
+                      {'> '}
+                      <span style={{ color: p.color }}>
+                        {p.name}
+                      </span>
+                      {p.role === 'impostor' && <span className="text-[var(--red)]"> [IMP]</span>}
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : (
+              <p className="text-[var(--dim)] mt-4">GHOST VOTE EXPENDED</p>
+            )
           ) : hasVoted ? (
             <div className="mt-4">
               <p className="text-[var(--dim)]">Vote cast. Waiting for others... ({votesCast}/{totalVoters})</p>
@@ -967,7 +1007,41 @@ export default function Game() {
             </form>
           </div>
         ) : (
-          <p className="text-[var(--dim)] pb-4">(You are dead. You can only listen.)</p>
+          <div className="pb-4">
+            <p className="text-[var(--dim)] mb-2">(You are dead. Meeting chat is read-only.)</p>
+            {/* Ghost chat during meetings */}
+            <div className="border-t border-[var(--dim)] pt-2 mt-2">
+              <p className="text-[var(--dim)] text-base mb-1 italic">GHOST CHANNEL:</p>
+              <div className="max-h-[20vh] overflow-y-auto mb-2">
+                {(gameState.ghostChat || []).length === 0 && (
+                  <p className="text-[var(--dim)] italic text-sm">No ghost messages yet.</p>
+                )}
+                {(gameState.ghostChat || []).map(msg => {
+                  const sender = gameState.players[msg.playerId];
+                  return (
+                    <p key={msg.id} className="text-base mb-1 italic opacity-60">
+                      <span style={{ color: sender?.color || 'var(--dim)' }}>
+                        {msg.playerName}:
+                      </span>
+                      {' '}{msg.message}
+                    </p>
+                  );
+                })}
+                <div ref={ghostChatEndRef} />
+              </div>
+              <form onSubmit={handleSendGhostChat} className="flex gap-2">
+                <span className="text-[var(--dim)] text-xl mt-1 opacity-60">{'>'}</span>
+                <input
+                  type="text"
+                  value={ghostChatMessage}
+                  onChange={(e) => setGhostChatMessage(e.target.value)}
+                  className="term-input flex-1 opacity-60"
+                  placeholder="Ghost chat... (only dead players see this)"
+                  maxLength={200}
+                />
+              </form>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -1039,7 +1113,10 @@ export default function Game() {
           )}
         </div>
         {currentPlayer.status === 'dead' && (
-          <p className="text-[var(--red)] glow-red text-lg">DEAD — GHOST MODE — You drift unseen.</p>
+          <div className="border border-[var(--dim)] px-3 py-2 mt-1 mb-1">
+            <p className="text-[var(--dim)] glow text-lg tracking-widest text-center">TERMINAL: SPECTATOR MODE</p>
+            <p className="text-[var(--dim)] text-sm text-center">You drift unseen. Complete tasks. Chat with the dead.</p>
+          </div>
         )}
         {/* Global task progress bar */}
         {gameState.taskProgress && (
@@ -1116,7 +1193,7 @@ export default function Game() {
       {/* Persistent task list */}
       {currentPlayer.role === 'innocent' && allMyTasks.length > 0 && (
         <div className="mb-4">
-          <p className="text-[var(--dim)] text-base mb-1">YOUR TASKS:</p>
+          <p className="text-[var(--dim)] text-base mb-1">{currentPlayer.status === 'dead' ? 'GHOST TASKS:' : 'YOUR TASKS:'}</p>
           {allMyTasks.map(task => {
             const loc = gameState.locations.find(l => l.id === task.location);
             const isHere = task.location === currentPlayer.location;
@@ -1203,10 +1280,14 @@ export default function Game() {
               visibleOthers.map((p, i) => (
                 <span key={p.id}>
                   {i > 0 && ', '}
-                  <span style={{ color: p.color }}>{p.name}</span>
+                  <span style={{ color: currentPlayer.status === 'dead' && p.role === 'impostor' ? 'var(--red)' : p.color }}>{p.name}</span>
                   {/* Co-impostor ALLY tag */}
                   {isImpostor && p.role === 'impostor' && (
                     <span className="text-[var(--red)]"> [ALLY]</span>
+                  )}
+                  {/* Ghost sees impostors */}
+                  {currentPlayer.status === 'dead' && p.role === 'impostor' && (
+                    <span className="text-[var(--red)]"> [IMP]</span>
                   )}
                 </span>
               ))
@@ -1450,6 +1531,39 @@ export default function Game() {
                   </button>
                 );
               })}
+          </div>
+
+          {/* Ghost chat panel — only during playing phase */}
+          <div className="mb-4 border-t border-[var(--dim)] pt-3">
+            <p className="text-[var(--dim)] text-base mb-1 italic">GHOST CHANNEL:</p>
+            <div className="max-h-[25vh] overflow-y-auto mb-2">
+              {(gameState.ghostChat || []).length === 0 && (
+                <p className="text-[var(--dim)] italic text-sm">No ghost messages yet. Say something to the dead.</p>
+              )}
+              {(gameState.ghostChat || []).map(msg => {
+                const sender = gameState.players[msg.playerId];
+                return (
+                  <p key={msg.id} className="text-base mb-1 italic opacity-60">
+                    <span style={{ color: sender?.color || 'var(--dim)' }}>
+                      {msg.playerName}:
+                    </span>
+                    {' '}{msg.message}
+                  </p>
+                );
+              })}
+              <div ref={ghostChatEndRef} />
+            </div>
+            <form onSubmit={handleSendGhostChat} className="flex gap-2">
+              <span className="text-[var(--dim)] text-xl mt-1 opacity-60">{'>'}</span>
+              <input
+                type="text"
+                value={ghostChatMessage}
+                onChange={(e) => setGhostChatMessage(e.target.value)}
+                className="term-input flex-1 opacity-60"
+                placeholder="Ghost chat... (only dead players see this)"
+                maxLength={200}
+              />
+            </form>
           </div>
         </div>
       )}
