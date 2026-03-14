@@ -215,6 +215,79 @@ pre {
   to { opacity: 1; transform: translateX(0); }
 }
 
+/* ── Sabotage Effects ────────────────────── */
+
+/* Screen glitch — brief jitter + color shift on sabotage activation */
+@keyframes screenGlitch {
+  0% { transform: translate(0); filter: none; }
+  10% { transform: translate(-2px, 1px); filter: hue-rotate(90deg); }
+  20% { transform: translate(2px, -1px); filter: hue-rotate(-90deg); }
+  30% { transform: translate(-1px, 2px); filter: hue-rotate(180deg); opacity: 0.9; }
+  40% { transform: translate(1px, -2px); filter: none; }
+  50% { transform: translate(-2px, 0); filter: hue-rotate(90deg); opacity: 0.85; }
+  60% { transform: translate(2px, 1px); filter: none; }
+  70% { transform: translate(0, -1px); filter: hue-rotate(-45deg); }
+  80% { transform: translate(-1px, 0); filter: none; opacity: 0.9; }
+  90% { transform: translate(1px, 1px); filter: hue-rotate(45deg); }
+  100% { transform: translate(0); filter: none; opacity: 1; }
+}
+
+.screen-glitch {
+  animation: screenGlitch 0.5s ease-out;
+}
+
+/* Blackout overlay — nearly full dark with faint green CRT glow */
+@keyframes blackoutPulse {
+  0%, 100% { opacity: 0.95; }
+  50% { opacity: 0.92; }
+}
+
+.blackout-overlay {
+  background: rgba(0, 0, 0, 0.92);
+  animation: blackoutPulse 2s ease-in-out infinite;
+}
+
+.blackout-active {
+  filter: brightness(0.1) contrast(0.5);
+  transition: filter 0.3s ease-in;
+}
+
+.blackout-active .fixed {
+  filter: none;
+}
+
+/* Comms static — subtle noise effect for comms jam */
+@keyframes commsStatic {
+  0% { background-position: 0 0; }
+  100% { background-position: 100% 100%; }
+}
+
+.comms-static {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 194, 51, 0.02) 2px,
+      rgba(255, 194, 51, 0.02) 4px
+    );
+  animation: commsStatic 0.5s linear infinite;
+}
+
+/* Scramble screen shake */
+@keyframes screenShake {
+  0%, 100% { transform: translate(0); }
+  10% { transform: translate(-3px, 2px); }
+  20% { transform: translate(3px, -2px); }
+  30% { transform: translate(-2px, 3px); }
+  40% { transform: translate(2px, -3px); }
+  50% { transform: translate(-3px, 1px); }
+  60% { transform: translate(3px, -1px); }
+  70% { transform: translate(-1px, 3px); }
+  80% { transform: translate(1px, -2px); }
+  90% { transform: translate(-2px, 1px); }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .terminal-flicker {
@@ -223,5 +296,13 @@ pre {
   .cursor-blink {
     animation: none;
     opacity: 1;
+  }
+  .screen-glitch,
+  .blackout-overlay,
+  .comms-static {
+    animation: none;
+  }
+  .blackout-active {
+    transition: none;
   }
 }

@@ -487,12 +487,6 @@ export default class GameServer implements Party.Server {
 
     if (player.status !== 'alive') return;
 
-    // Room-specific door lock: can't leave or enter the locked room
-    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()) {
-      const lockedRoom = this.gameState.doorsLocked.room;
-      if (player.location === lockedRoom || data.location === lockedRoom) return;
-    }
-
     // Validate the destination is connected to the player's current location
     const currentLoc = this.gameState.locations.find(l => l.id === player.location);
     if (!currentLoc || !currentLoc.connectedTo.includes(data.location)) return;
@@ -716,13 +710,20 @@ export default class GameServer implements Party.Server {
     const player = this.gameState.players[msg.playerId];
     if (!player) return;
 
-    const message = typeof msg.data.message === 'string' ? msg.data.message.slice(0, 200) : '';
+    let message = typeof msg.data.message === 'string' ? msg.data.message.slice(0, 200) : '';
     if (!message) return;
 
     // Rate limit: 1 message per 2 seconds per player
     const now = Date.now();
     if (now - (this.lastChatTimes[msg.playerId] || 0) < 2000) return;
     this.lastChatTimes[msg.playerId] = now;
+
+    // Comms Jam: garble living player chat during meeting/voting phases
+    if (this.gameState.commsJam && this.gameState.commsJam.until > now &&
+        player.status === 'alive' &&
+        (this.gameState.phase === 'meeting' || this.gameState.phase === 'voting')) {
+      message = this.garbleMessage(message);
+    }
 
     const chatMsg = {
       id: `${Date.now()}-${msg.playerId}`,
@@ -747,6 +748,15 @@ export default class GameServer implements Party.Server {
         this.gameState.chat = this.gameState.chat.slice(-50);
       }
     }
+  }
+
+  // Garble a message for comms jam — replace ~30% of alphanumeric chars with █
+  garbleMessage(text: string): string {
+    return text.split('').map(ch => {
+      // Keep spaces, punctuation, and emoji intact
+      if (/\s/.test(ch) || /[^a-zA-Z0-9]/.test(ch)) return ch;
+      return Math.random() < 0.3 ? '\u2588' : ch;
+    }).join('');
   }
 
   handleVote(msg: ClientMessage) {
@@ -816,37 +826,32 @@ export default class GameServer implements Party.Server {
     const now = Date.now();
     if (now - this.lastSabotageTime < 45000) return;
 
-    // Can't stack active sabotages
-    if (this.gameState.lightsOut && this.gameState.lightsOut.until > now) return;
-    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > now) return;
+    // Can't stack active sabotages (blackout is short but check anyway)
+    if (this.gameState.blackout && this.gameState.blackout.until > now) return;
 
     const sabotageType = msg.data?.type;
 
-    if (sabotageType === 'lightsOut') {
+    if (sabotageType === 'commsJam') {
       this.lastSabotageTime = now;
-      this.logEvent('Lights Out sabotage activated.');
-      this.gameState.lightsOut = { until: now + 30000 };
+      this.logEvent('Comms Jam sabotage activated.');
+      // Active for 2 minutes or until next meeting ends, whichever comes first
+      this.gameState.commsJam = { until: now + 120000 };
       this.ephemeralTimers.push(setTimeout(() => {
-        if (this.gameState && this.gameState.phase === 'playing') {
-          this.gameState.lightsOut = undefined;
+        if (this.gameState) {
+          this.gameState.commsJam = undefined;
           this.broadcastFiltered();
         }
-      }, 30000));
-    } else if (sabotageType === 'doorsLocked') {
-      const targetRoom = typeof msg.data?.room === 'string' ? msg.data.room : null;
-      if (!targetRoom) return;
-      // Validate room exists and isn't the secret room
-      const roomExists = this.gameState.locations.some(l => l.id === targetRoom && l.id !== 'secret');
-      if (!roomExists) return;
+      }, 120000));
+    } else if (sabotageType === 'blackout') {
       this.lastSabotageTime = now;
-      this.logEvent('Door Lock sabotage activated.');
-      this.gameState.doorsLocked = { until: now + 25000, room: targetRoom };
+      this.logEvent('Blackout sabotage activated.');
+      this.gameState.blackout = { until: now + 10000 };
       this.ephemeralTimers.push(setTimeout(() => {
         if (this.gameState && this.gameState.phase === 'playing') {
-          this.gameState.doorsLocked = undefined;
+          this.gameState.blackout = undefined;
           this.broadcastFiltered();
         }
-      }, 25000));
+      }, 10000));
     } else if (sabotageType === 'scramble') {
       this.lastSabotageTime = now;
       this.logEvent('Scramble sabotage activated.');
@@ -869,10 +874,6 @@ export default class GameServer implements Party.Server {
 
   handleEnterSecretRoom(msg: ClientMessage) {
     if (!this.gameState || this.gameState.phase !== 'playing') return;
-
-    // Can't enter secret room if its entrance room is locked
-    if (this.gameState.doorsLocked && this.gameState.doorsLocked.until > Date.now()
-        && this.gameState.doorsLocked.room === this.gameState.secretRoomEntrance) return;
 
     const player = this.gameState.players[msg.playerId];
     if (!player || player.status !== 'alive') return;
@@ -1136,6 +1137,8 @@ export default class GameServer implements Party.Server {
 
             this.gameState.phase = 'playing';
             this.gameState.chat = [];
+            // Clear comms jam after meeting ends
+            this.gameState.commsJam = undefined;
             // Note: ghostChat persists across meetings (ghosts keep their conversation)
             // Restore the game timer display for clients
             this.gameState.timer = {
@@ -1472,8 +1475,8 @@ export default class GameServer implements Party.Server {
     this.gameState.deadBodies = [];
     this.gameState.timer = undefined;
     this.gameState.winner = undefined;
-    this.gameState.lightsOut = undefined;
-    this.gameState.doorsLocked = undefined;
+    this.gameState.commsJam = undefined;
+    this.gameState.blackout = undefined;
     this.gameState.secretRoomMethod = undefined;
     this.gameState.secretRoomEntrance = undefined;
     this.gameState.scrambled = undefined;
@@ -1576,8 +1579,8 @@ export default class GameServer implements Party.Server {
     this.gameState.deadBodies = [];
     this.gameState.timer = undefined;
     this.gameState.winner = undefined;
-    this.gameState.lightsOut = undefined;
-    this.gameState.doorsLocked = undefined;
+    this.gameState.commsJam = undefined;
+    this.gameState.blackout = undefined;
     this.gameState.secretRoomMethod = undefined;
     this.gameState.secretRoomEntrance = undefined;
     this.gameState.scrambled = undefined;
@@ -1707,6 +1710,12 @@ export default class GameServer implements Party.Server {
         if (!isImpostor && p.role === 'impostor' &&
             p.powerup?.type === 'shadowWalk' && p.powerup.until > Date.now()) {
           fp.location = '__shadow__';
+        }
+
+        // Blackout: hide player locations from innocents (impostors have night vision)
+        if (!isImpostor && gs.blackout && gs.blackout.until > Date.now()) {
+          // Innocents can't see who's in their room — hide other player locations
+          fp.location = '__blackout__';
         }
 
         // Shapeshifter disguise: innocents see the disguised identity

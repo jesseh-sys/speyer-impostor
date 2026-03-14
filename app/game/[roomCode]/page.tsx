@@ -293,8 +293,8 @@ export default function Game() {
   const [killPending, setKillPending] = useState(false);
   const [shieldBlockMsg, setShieldBlockMsg] = useState<string | null>(null);
 
-  // Door lock room picker
-  const [showDoorLockPicker, setShowDoorLockPicker] = useState(false);
+  // Sabotage panel
+  const [showSabotagePanel, setShowSabotagePanel] = useState(false);
 
   // Sheriff investigate result overlay
   const [investigateResult, setInvestigateResult] = useState<{ targetName: string; isImpostor: boolean } | null>(null);
@@ -560,8 +560,6 @@ export default function Game() {
       const gs = gameStateRef.current;
       const p = gs?.players?.[playerId];
       if (!p || p.status !== 'alive') return;
-      // Don't grue-move during doors locked
-      if (gs?.doorsLocked && gs.doorsLocked.until > Date.now()) return;
       const loc = gs?.locations.find(l => l.id === p.location);
       if (!loc?.connectedTo.length) return;
       const exits = loc.connectedTo.filter(id => id !== 'secret');
@@ -1435,11 +1433,21 @@ export default function Game() {
     const hasVoted = gameState.votes[playerId] !== undefined;
     const votesCast = Object.keys(gameState.votes).length;
     const totalVoters = alivePlayers.length;
+    const commsJamDuringVoting = gameState.commsJam && Date.now() < gameState.commsJam.until;
 
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto">
+      <div className={`min-h-screen p-4 max-w-lg mx-auto ${commsJamDuringVoting ? 'comms-static' : ''}`}>
 
-        <div className="mt-4">
+        {/* Comms Jam warning banner */}
+        {commsJamDuringVoting && (
+          <div className="fixed top-0 left-0 right-0 z-30 text-center py-2" style={{ background: 'rgba(255, 194, 51, 0.15)' }}>
+            <p className="text-[var(--amber)] text-lg tracking-widest" style={{ textShadow: '0 0 10px var(--amber)', animation: 'blink 2s step-end infinite' }}>
+              {'\u26A0'} COMMS JAMMED — TRANSMISSIONS CORRUPTED {'\u26A0'}
+            </p>
+          </div>
+        )}
+
+        <div className={`mt-4 ${commsJamDuringVoting ? 'pt-8' : ''}`}>
           {/* Game clock */}
           {gameClockSeconds > 0 && (
             <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
@@ -1521,10 +1529,20 @@ export default function Game() {
   // ── MEETING (with game clock) ──────────────────
 
   if (gameState.phase === 'meeting') {
+    const commsJamDuringMeeting = gameState.commsJam && Date.now() < gameState.commsJam.until;
     return (
-      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col">
+      <div className={`min-h-screen p-4 max-w-lg mx-auto flex flex-col ${commsJamDuringMeeting ? 'comms-static' : ''}`}>
 
-        <div className="mt-4">
+        {/* Comms Jam warning banner */}
+        {commsJamDuringMeeting && (
+          <div className="fixed top-0 left-0 right-0 z-30 text-center py-2" style={{ background: 'rgba(255, 194, 51, 0.15)' }}>
+            <p className="text-[var(--amber)] text-lg tracking-widest" style={{ textShadow: '0 0 10px var(--amber)', animation: 'blink 2s step-end infinite' }}>
+              {'\u26A0'} COMMS JAMMED — TRANSMISSIONS CORRUPTED {'\u26A0'}
+            </p>
+          </div>
+        )}
+
+        <div className={`mt-4 ${commsJamDuringMeeting ? 'pt-8' : ''}`}>
           {/* Game clock */}
           {gameClockSeconds > 0 && (
             <p className="text-[var(--green)] text-sm text-right opacity-60">Game: [{formatTime(gameClockSeconds)}]</p>
@@ -1674,9 +1692,10 @@ export default function Game() {
   // ── MAIN PLAYING PHASE ────────────────────────
 
   const othersHere = playersHere.filter(p => p.id !== playerId);
-  const isLightsOut = gameState.lightsOut ? Date.now() < gameState.lightsOut.until : false;
-  const visibleOthers = othersHere;
   const isImpostor = currentPlayer.role === 'impostor';
+  const isBlackout = gameState.blackout ? Date.now() < gameState.blackout.until : false;
+  const isCommsJamActive = gameState.commsJam ? Date.now() < gameState.commsJam.until : false;
+  const visibleOthers = othersHere;
 
   const killTargets = isImpostor
     ? othersHere.filter(p => p.role !== 'impostor')
@@ -1689,11 +1708,6 @@ export default function Game() {
     currentPlayer.powerup.until > Date.now();
 
   const bloodhoundTarget = gameState.bloodhoundTarget || null;
-  const doorLockActive = gameState.doorsLocked && Date.now() < gameState.doorsLocked.until;
-  const isDoorsLocked = !!doorLockActive;
-  const lockedRoomId = doorLockActive ? gameState.doorsLocked!.room : null;
-  const lockedRoomName = lockedRoomId ? gameState.locations.find(l => l.id === lockedRoomId)?.name : null;
-  const playerInLockedRoom = lockedRoomId === currentPlayer.location;
 
   // Cooldown computations
   const now = Date.now();
@@ -1710,9 +1724,20 @@ export default function Game() {
   const allMyTasks = gameState.tasks.filter(t => t.id.startsWith(playerId));
 
   return (
-    <div className="min-h-screen p-4 max-w-lg mx-auto pb-16">
+    <div className={`min-h-screen p-4 max-w-lg mx-auto pb-16 ${isBlackout && !isImpostor && currentPlayer.status === 'alive' ? 'blackout-active' : ''}`}>
       {roleRevealOverlay}
       {taskBanner}
+
+      {/* Blackout overlay for innocents */}
+      {isBlackout && !isImpostor && currentPlayer.status === 'alive' && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center pointer-events-none blackout-overlay">
+          <p className="text-[var(--red)] text-2xl tracking-widest" style={{ animation: 'blink 1s step-end infinite', textShadow: '0 0 20px var(--red)' }}>
+            BLACKOUT — SYSTEMS OFFLINE
+          </p>
+        </div>
+      )}
+
+      {/* Sabotage activation flash — brief "SYSTEM BREACH DETECTED" */}
 
       {/* Header */}
       <div className="mt-4">
@@ -1953,34 +1978,19 @@ export default function Game() {
       )}
 
       {/* Sabotage banners */}
-      {isLightsOut && (
-        <p className="text-[var(--green)] glow-green text-lg mb-2">
-          ⚡ LIGHTS OUT ⚡ — You can barely see anything.
+      {isCommsJamActive && (
+        <p className="text-[var(--amber)] text-lg mb-2" style={{ textShadow: '0 0 8px var(--amber)' }}>
+          COMMS JAM ACTIVE — NEXT MEETING AFFECTED
         </p>
       )}
       {gameState.scrambled && Date.now() < gameState.scrambled.until && (
-        <p className="text-[var(--green)] glow-green text-lg mb-2">
-          &#9889; SCRAMBLE &#9889; — Everyone has been teleported!
-        </p>
-      )}
-      {isDoorsLocked && (
-        <div className="mb-2">
-          {playerInLockedRoom ? (
-            <>
-              <p className="text-[var(--red)] glow-red text-lg">
-                &#128274; DOORS LOCKED &#128274; — You{"'"}re trapped!
-              </p>
-              {othersHere.length > 0 && (
-                <p className="text-[var(--dim)] text-base">
-                  Trapped with: {othersHere.map(p => p.name).join(', ')}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-[var(--green)] text-lg">
-              &#128274; {lockedRoomName || 'A room'} is locked down.
-            </p>
-          )}
+        <div className="mb-2 screen-glitch">
+          <p className="text-[var(--red)] glow-red text-lg">
+            SPATIAL ANOMALY DETECTED
+          </p>
+          <p className="text-[var(--green)] glow-green text-lg">
+            Everyone has been teleported!
+          </p>
         </div>
       )}
 
@@ -2003,30 +2013,24 @@ export default function Game() {
         {visibleOthers.length > 0 ? (
           <p className="text-lg">
             <span className="text-[var(--dim)]">You see: </span>
-            {isLightsOut && !isImpostor ? (
-              <span className="text-[var(--dim)]">
-                Shadows move around you...
+            {visibleOthers.map((p, i) => (
+              <span key={p.id}>
+                {i > 0 && ', '}
+                <span style={{ color: currentPlayer.status === 'dead' && p.role === 'impostor' ? 'var(--red)' : p.color }}>{p.name}</span>
+                {/* Co-impostor ALLY tag */}
+                {isImpostor && p.role === 'impostor' && (
+                  <span className="text-[var(--red)]"> [ALLY]</span>
+                )}
+                {/* Ghost sees impostors */}
+                {currentPlayer.status === 'dead' && p.role === 'impostor' && (
+                  <span className="text-[var(--red)]"> [IMP]</span>
+                )}
               </span>
-            ) : (
-              visibleOthers.map((p, i) => (
-                <span key={p.id}>
-                  {i > 0 && ', '}
-                  <span style={{ color: currentPlayer.status === 'dead' && p.role === 'impostor' ? 'var(--red)' : p.color }}>{p.name}</span>
-                  {/* Co-impostor ALLY tag */}
-                  {isImpostor && p.role === 'impostor' && (
-                    <span className="text-[var(--red)]"> [ALLY]</span>
-                  )}
-                  {/* Ghost sees impostors */}
-                  {currentPlayer.status === 'dead' && p.role === 'impostor' && (
-                    <span className="text-[var(--red)]"> [IMP]</span>
-                  )}
-                </span>
-              ))
-            )}
+            ))}
           </p>
         ) : (
           <p className="text-[var(--dim)] text-lg">
-            {isLightsOut ? "You can't tell if you're alone." : "You are alone here."}
+            You are alone here.
           </p>
         )}
         {/* Ghosts visible to other ghosts */}
@@ -2076,9 +2080,7 @@ export default function Game() {
           {gameState.deadBodies?.filter(b => b.location === currentPlayer.location).map(body => (
             <div key={body.playerId} className="mb-4">
               <p className="text-[var(--red)] glow-red text-lg">
-                {isLightsOut && !isImpostor
-                  ? 'You trip over something. A body.'
-                  : `${gameState.players[body.playerId]?.name || 'Someone'} lies motionless on the ground.`}
+                {`${gameState.players[body.playerId]?.name || 'Someone'} lies motionless on the ground.`}
               </p>
               {!body.reportedBy && (
                 <button className="term-btn term-btn-red text-lg" onClick={handleReportBody}>
@@ -2118,47 +2120,55 @@ export default function Game() {
             <div className="mb-4">
               {sabotageCooldownLeft > 0 ? (
                 <p className="text-[var(--dim)] text-lg">SABOTAGE [{sabotageCooldownLeft}s]</p>
-              ) : !isLightsOut && !isDoorsLocked ? (
+              ) : (
                 <>
-                  <p className="text-[var(--red)] text-lg">SABOTAGE:</p>
                   <button
-                    className="term-btn term-btn-green text-lg"
-                    onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'lightsOut' } }))}
+                    className="term-btn term-btn-red text-lg"
+                    onClick={() => setShowSabotagePanel(!showSabotagePanel)}
                   >
-                    {'> '}Kill the lights (30s)
+                    {'> '}SABOTAGE {showSabotagePanel ? '\u25BC' : '\u25B6'}
                   </button>
-                  <button
-                    className="term-btn term-btn-green text-lg"
-                    onClick={() => setShowDoorLockPicker(!showDoorLockPicker)}
-                  >
-                    {'> '}Lock a room (25s) {showDoorLockPicker ? '▼' : '▶'}
-                  </button>
-                  {showDoorLockPicker && (
-                    <div className="ml-6">
-                      {gameState.locations
-                        .filter(l => l.id !== 'secret')
-                        .map(loc => (
-                          <button
-                            key={loc.id}
-                            className="term-btn term-btn-green text-base"
-                            onClick={() => {
-                              socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'doorsLocked', room: loc.id } }));
-                              setShowDoorLockPicker(false);
-                            }}
-                          >
-                            {'  > '}{loc.name}{loc.id === currentPlayer.location ? ' (you\'re here)' : ''}
-                          </button>
-                        ))}
+                  {showSabotagePanel && (
+                    <div className="ml-2 border border-[var(--red)] p-2 mt-1" style={{ borderColor: 'rgba(255, 0, 64, 0.4)' }}>
+                      <p className="text-[var(--red)] text-base mb-2 tracking-widest">{'═'.repeat(3)} SABOTAGE {'═'.repeat(12)}</p>
+                      <button
+                        className="term-btn term-btn-red text-base"
+                        onClick={() => {
+                          socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'commsJam' } }));
+                          setShowSabotagePanel(false);
+                        }}
+                      >
+                        {'> '}[COMMS JAM] <span className="text-[var(--dim)]">Corrupt next meeting{"'"}s chat</span>
+                      </button>
+                      <button
+                        className="term-btn term-btn-red text-base"
+                        onClick={() => {
+                          socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'blackout' } }));
+                          setShowSabotagePanel(false);
+                        }}
+                      >
+                        {'> '}[BLACKOUT] <span className="text-[var(--dim)]">10s darkness — blind the crew</span>
+                      </button>
+                      <button
+                        className="term-btn term-btn-red text-base"
+                        onClick={() => {
+                          socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }));
+                          setShowSabotagePanel(false);
+                        }}
+                      >
+                        {'> '}[SCRAMBLE] <span className="text-[var(--dim)]">Teleport everyone randomly</span>
+                      </button>
+                      <p className="text-[var(--red)] text-base mt-2 tracking-widest">{'═'.repeat(22)}</p>
+                      <button
+                        className="term-btn text-[var(--dim)] text-base"
+                        onClick={() => setShowSabotagePanel(false)}
+                      >
+                        {'> '}[CANCEL]
+                      </button>
                     </div>
                   )}
-                  <button
-                    className="term-btn term-btn-green text-lg"
-                    onClick={() => socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }))}
-                  >
-                    {'> '}Scramble everyone
-                  </button>
                 </>
-              ) : null}
+              )}
             </div>
           )}
 
@@ -2259,15 +2269,13 @@ export default function Game() {
               .filter(locId => locId !== 'secret')
               .map(locId => {
                 const loc = gameState.locations.find(l => l.id === locId);
-                const exitBlocked = isDoorsLocked && (playerInLockedRoom || locId === lockedRoomId);
                 return (
                   <button
                     key={locId}
-                    className={`term-btn text-lg ${exitBlocked ? 'text-[var(--dim)]' : ''}`}
-                    onClick={() => !exitBlocked && handleMove(locId)}
-                    disabled={exitBlocked}
+                    className="term-btn text-lg"
+                    onClick={() => handleMove(locId)}
                   >
-                    {'> '}{loc?.name}{exitBlocked ? ' [LOCKED]' : ''}
+                    {'> '}{loc?.name}
                   </button>
                 );
               })}

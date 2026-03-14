@@ -88,12 +88,11 @@ export interface GameState {
   };
   winner?: 'innocents' | 'impostors' | 'jester';
   survivorWin?: { playerId: string; name: string };
-  lightsOut?: {
-    until: number; // timestamp when lights come back
+  commsJam?: {
+    until: number; // timestamp when comms jam expires (affects next meeting)
   };
-  doorsLocked?: {
-    until: number; // timestamp when doors unlock
-    room: string;  // which room is locked
+  blackout?: {
+    until: number; // timestamp when blackout ends (10s darkness)
   };
   secretRoomMethod?: 'piano' | 'shelves' | 'cases'; // which discovery is active this game
   secretRoomEntrance?: string; // which room has the hidden entrance this game
