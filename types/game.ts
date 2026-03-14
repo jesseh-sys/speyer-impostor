@@ -26,6 +26,7 @@ export interface Player {
     asPlayerId: string;
     asName: string;
     asColor: string;
+    asIcon: string;
     until: number; // timestamp when disguise expires
   };
   survivorShields?: number; // Survivor role: starts with 2 shields

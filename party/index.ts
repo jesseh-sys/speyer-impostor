@@ -24,6 +24,7 @@ export default class GameServer implements Party.Server {
   private lastChatTimes: Record<string, number> = {}; // rate limit: 1 msg per 2s per player
   private lastInvestigateTime: Record<string, number> = {}; // sheriff investigate cooldown
   private lastShapeshiftTime: Record<string, number> = {}; // shapeshifter cooldown
+  private lastSecretRoomEntry: Record<string, number> = {}; // secret room entry cooldown
   private phantomGlitchKillerId: string | null = null; // hidden from clients — revealed on report
   private gameEventLog: Array<{ time: number; event: string }> = [];
   private gameStartTime: number = 0;
@@ -294,6 +295,9 @@ export default class GameServer implements Party.Server {
 
   handleStartGame() {
     if (!this.gameState) return;
+
+    // Phase guard: only start from lobby or preGame
+    if (this.gameState.phase !== 'lobby' && this.gameState.phase !== 'preGame') return;
 
     const playerIds = Object.keys(this.gameState.players);
     const playerCount = playerIds.length;
@@ -809,9 +813,12 @@ export default class GameServer implements Party.Server {
 
     this.gameState.votes[playerId] = targetId;
 
-    // Short-circuit: end voting early when all alive players have voted
+    // Short-circuit: end voting early when all alive players AND all ghosts with unused ghost votes have voted
     const allAlive = Object.values(this.gameState.players).filter(p => p.status === 'alive');
-    if (allAlive.every(p => this.gameState!.votes[p.id] !== undefined)) {
+    const ghostsWithVotes = Object.values(this.gameState.players).filter(p => p.status === 'dead' && !p.ghostVoteUsed);
+    const allVoted = allAlive.every(p => this.gameState!.votes[p.id] !== undefined) &&
+      ghostsWithVotes.every(p => this.gameState!.votes[p.id] !== undefined);
+    if (allVoted) {
       this.countVotes();
     }
   }
@@ -826,8 +833,10 @@ export default class GameServer implements Party.Server {
     const now = Date.now();
     if (now - this.lastSabotageTime < 45000) return;
 
-    // Can't stack active sabotages (blackout is short but check anyway)
+    // Can't stack active sabotages — check all three types
+    if (this.gameState.commsJam && this.gameState.commsJam.until > now) return;
     if (this.gameState.blackout && this.gameState.blackout.until > now) return;
+    if (this.gameState.scrambled && this.gameState.scrambled.until > now) return;
 
     const sabotageType = msg.data?.type;
 
@@ -881,6 +890,11 @@ export default class GameServer implements Party.Server {
     // Must be in the room with the secret entrance
     if (player.location !== this.gameState.secretRoomEntrance) return;
 
+    // Cooldown: 90 seconds between secret room entries
+    const now = Date.now();
+    const lastEntry = this.lastSecretRoomEntry[msg.playerId] || 0;
+    if (now - lastEntry < 90000) return;
+
     // Already have an active powerup? Can't stack.
     if (player.powerup && player.powerup.until > Date.now()) return;
 
@@ -898,6 +912,8 @@ export default class GameServer implements Party.Server {
       type: powerup,
       until: Date.now() + 30000, // 30 seconds
     };
+
+    this.lastSecretRoomEntry[msg.playerId] = Date.now();
 
     // Auto-clear powerup after expiry (checks timestamp, so meetings extending it still work)
     const pid = msg.playerId;
@@ -1001,6 +1017,7 @@ export default class GameServer implements Party.Server {
       asPlayerId: targetId,
       asName: target.name,
       asColor: target.color,
+      asIcon: target.icon,
       until: disguiseUntil,
     };
 
@@ -1383,16 +1400,13 @@ export default class GameServer implements Party.Server {
       }
     }
 
-    // LAST STANDING: Last innocent alive (if impostors won)
+    // LAST STANDING: Last innocent alive (if impostors won) — only ONE player
     if (this.gameState.winner === 'impostors') {
       const aliveInnocents = allPlayers.filter(p => p.role === 'innocent' && p.status === 'alive');
-      // If only one innocent left alive when impostors won
       if (aliveInnocents.length > 0) {
-        // Find who was alive longest — the one still alive (or last killed before game ended)
-        // Since impostors win when they equal/outnumber innocents, there may be alive innocents
-        for (const p of aliveInnocents) {
-          addAward(p.id, 'LAST STANDING', 'Held out the longest');
-        }
+        // Tiebreaker: most tasks completed
+        const sorted = [...aliveInnocents].sort((a, b) => b.tasksCompleted - a.tasksCompleted);
+        addAward(sorted[0].id, 'LAST STANDING', 'Held out the longest');
       }
     }
 
@@ -1452,6 +1466,15 @@ export default class GameServer implements Party.Server {
 
   private enterPreGame() {
     if (!this.gameState) return;
+
+    // Clear any lingering timers from previous game
+    this.meetingTimers.forEach(t => clearTimeout(t));
+    this.meetingTimers = [];
+    this.ephemeralTimers.forEach(t => clearTimeout(t));
+    this.ephemeralTimers = [];
+
+    // Clear secret room cooldowns
+    this.lastSecretRoomEntry = {};
 
     // Reset players for new game, keep names/icons/colors
     for (const player of Object.values(this.gameState.players)) {
@@ -1605,6 +1628,7 @@ export default class GameServer implements Party.Server {
     this.lastChatTimes = {};
     this.lastInvestigateTime = {};
     this.lastShapeshiftTime = {};
+    this.lastSecretRoomEntry = {};
     this.phantomGlitchKillerId = null;
     this.gameEventLog = [];
     this.gameStartTime = 0;
@@ -1668,7 +1692,7 @@ export default class GameServer implements Party.Server {
 
   // Filter state for a specific player — hide what they shouldn't see
   filterStateForPlayer(playerId: string): GameState {
-    if (!this.gameState) return this.gameState!;
+    if (!this.gameState) return {} as GameState;
 
     const gs = this.gameState;
     const player = gs.players[playerId];
@@ -1723,6 +1747,7 @@ export default class GameServer implements Party.Server {
         if (!isImpostor && p.disguise && p.disguise.until > Date.now()) {
           fp.name = p.disguise.asName;
           fp.color = p.disguise.asColor;
+          fp.icon = p.disguise.asIcon;
           // Keep disguise info so client knows this is a disguised player (but don't reveal real identity)
           fp.disguise = undefined;
         }
