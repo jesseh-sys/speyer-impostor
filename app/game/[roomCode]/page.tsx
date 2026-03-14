@@ -317,12 +317,37 @@ export default function Game() {
   // Mini-map toggle
   const [showMap, setShowMap] = useState(false);
 
-  // Restart delay (prevent rage-restart before others read results)
-  const [restartReady, setRestartReady] = useState(false);
-
   // Task completion banner
   const [taskCompleteBanner, setTaskCompleteBanner] = useState(false);
   const prevTaskCountRef = useRef<number | null>(null);
+
+  // Track if player has been in a game this session (for redirect logic)
+  const hasPlayedRef = useRef(false);
+
+  // Restart countdown timer
+  const [restartCountdown, setRestartCountdown] = useState(0);
+
+  // Session stats
+  interface SessionStats {
+    gamesPlayed: number;
+    wins: number;
+    losses: number;
+    kills: number;
+    tasksCompleted: number;
+    timesImpostor: number;
+    timesEjected: number;
+    currentStreak: number;
+  }
+  const [sessionStats, setSessionStats] = useState<SessionStats>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem(`sessionStats-${roomCode}`);
+      if (stored) {
+        try { return JSON.parse(stored); } catch { /* ignore */ }
+      }
+    }
+    return { gamesPlayed: 0, wins: 0, losses: 0, kills: 0, tasksCompleted: 0, timesImpostor: 0, timesEjected: 0, currentStreak: 0 };
+  });
+  const sessionStatsUpdatedRef = useRef(false);
 
   const socketRef = useRef<ReturnType<typeof usePartySocket> | null>(null);
   const socket = usePartySocket({
@@ -406,10 +431,17 @@ export default function Game() {
     return () => clearInterval(interval);
   }, [gameState?.timer?.startTime, gameState?.timer?.duration]);
 
-  // ── Redirect to lobby on restart ─────────────
+  // ── Redirect to lobby (only if player hasn't been in a game) ─────────────
   useEffect(() => {
-    if (gameState?.phase === 'lobby') {
+    if (gameState?.phase === 'lobby' && !hasPlayedRef.current) {
       router.push(`/lobby/${roomCode}`);
+    }
+  }, [gameState?.phase]);
+
+  // Mark as "has played" when game starts
+  useEffect(() => {
+    if (gameState?.phase === 'playing') {
+      hasPlayedRef.current = true;
     }
   }, [gameState?.phase]);
 
@@ -553,14 +585,71 @@ export default function Game() {
   // Keep refs fresh for use in setTimeout closures
   playerLocationRef.current = currentPlayer?.location;
 
-  // ── Restart delay on game over ─────────────────
+  // ── Restart countdown on game over ─────────────────
   useEffect(() => {
-    if (gameState?.phase === 'gameOver') {
-      setRestartReady(false);
-      const t = setTimeout(() => setRestartReady(true), 3000);
-      return () => clearTimeout(t);
+    if (gameState?.phase === 'gameOver' && gameState.restartCountdown) {
+      const update = () => {
+        const remaining = Math.max(0, Math.ceil((gameState.restartCountdown!.until - Date.now()) / 1000));
+        setRestartCountdown(remaining);
+      };
+      update();
+      const interval = setInterval(update, 1000);
+      return () => clearInterval(interval);
     }
-  }, [gameState?.phase]);
+  }, [gameState?.phase, gameState?.restartCountdown?.until]);
+
+  // ── Session stats update on game over ─────────────────
+  useEffect(() => {
+    if (gameState?.phase === 'gameOver' && !sessionStatsUpdatedRef.current && playerId) {
+      sessionStatsUpdatedRef.current = true;
+      const player = gameState.players[playerId];
+      if (!player) return;
+
+      // Count kills from event log
+      const myKills = (gameState.eventLog || []).filter(e =>
+        e.event.startsWith(player.name + ' eliminated')
+      ).length;
+
+      // Was I ejected?
+      const wasEjected = player.status === 'dead' && (gameState.eventLog || []).some(e =>
+        e.event.includes(player.name + ' was ejected')
+      );
+
+      // Did I win?
+      const isImpostor = player.role === 'impostor';
+      const isJester = player.specialRole === 'jester';
+      let won = false;
+      if (isJester) {
+        won = gameState.winner === 'jester';
+      } else if (isImpostor) {
+        won = gameState.winner === 'impostors';
+      } else {
+        won = gameState.winner === 'innocents';
+      }
+      // Survivor wins if alive at end
+      if (player.specialRole === 'survivor' && player.status === 'alive') {
+        won = true;
+      }
+
+      setSessionStats(prev => {
+        const updated = {
+          gamesPlayed: prev.gamesPlayed + 1,
+          wins: prev.wins + (won ? 1 : 0),
+          losses: prev.losses + (won ? 0 : 1),
+          kills: prev.kills + myKills,
+          tasksCompleted: prev.tasksCompleted + player.tasksCompleted,
+          timesImpostor: prev.timesImpostor + (isImpostor ? 1 : 0),
+          timesEjected: prev.timesEjected + (wasEjected ? 1 : 0),
+          currentStreak: won ? prev.currentStreak + 1 : 0,
+        };
+        sessionStorage.setItem(`sessionStats-${roomCode}`, JSON.stringify(updated));
+        return updated;
+      });
+    }
+    if (gameState?.phase !== 'gameOver') {
+      sessionStatsUpdatedRef.current = false;
+    }
+  }, [gameState?.phase, playerId]);
 
   // ── Role reveal overlay ────────────────────────
   useEffect(() => {
@@ -573,6 +662,14 @@ export default function Game() {
       }
     }
   }, [gameState?.phase, gameState?.timer?.startTime]);
+
+  // Reset role reveal flag on preGame so it shows again next round
+  useEffect(() => {
+    if (gameState?.phase === 'preGame') {
+      roleRevealShownRef.current = false;
+      setSecretRoomFound(false);
+    }
+  }, [gameState?.phase]);
 
   // ── Task completion banner ─────────────────────
   useEffect(() => {
@@ -1065,20 +1162,123 @@ export default function Game() {
 
           <DeclassifiedLog gameState={gameState} />
 
+          {/* Session Stats */}
+          {sessionStats.gamesPlayed > 0 && (
+            <div className="mt-4">
+              <div className="text-[var(--dim)]">{'═'.repeat(36)}</div>
+              <p className="text-[var(--green)] text-base tracking-widest">SESSION LOG</p>
+              <p className="text-[var(--dim)] text-base">
+                GAMES: {sessionStats.gamesPlayed}  |  W: {sessionStats.wins}  L: {sessionStats.losses}
+                {sessionStats.currentStreak > 1 && `  |  STREAK: ${sessionStats.currentStreak}`}
+              </p>
+              <p className="text-[var(--dim)] text-base">
+                KILLS: {sessionStats.kills}  |  TASKS: {sessionStats.tasksCompleted}
+                {sessionStats.timesImpostor > 0 && `  |  IMPOSTOR: ${sessionStats.timesImpostor}x`}
+              </p>
+              <div className="text-[var(--dim)]">{'═'.repeat(36)}</div>
+            </div>
+          )}
+
+          {/* Revenge text */}
+          {(() => {
+            const player = currentPlayer;
+            const isImpostor = player.role === 'impostor';
+            const isJester = player.specialRole === 'jester';
+            const wasKilled = player.status === 'dead' && !isImpostor;
+            const impostorWon = gameState.winner === 'impostors';
+            const innocentsWon = gameState.winner === 'innocents';
+            const jesterWon = gameState.winner === 'jester';
+
+            let revengeText = '';
+            if (isJester && jesterWon) {
+              revengeText = 'THEY FELL FOR IT. BEAUTIFUL.';
+            } else if (isJester && !jesterWon) {
+              revengeText = "THEY DIDN'T TAKE THE BAIT. NEXT TIME.";
+            } else if (isImpostor && impostorWon) {
+              revengeText = 'THEY NEVER SUSPECTED A THING. CAN YOU DO IT AGAIN?';
+            } else if (isImpostor && !impostorWon) {
+              revengeText = 'YOUR COVER WAS BLOWN. TRY AGAIN?';
+            } else if (wasKilled && impostorWon) {
+              revengeText = 'THE IMPOSTOR STILL WALKS FREE. WILL YOU STOP THEM?';
+            } else if (innocentsWon) {
+              revengeText = 'YOU SURVIVED. BUT THE DARKNESS ALWAYS RETURNS.';
+            } else {
+              revengeText = 'THE DARKNESS ALWAYS RETURNS.';
+            }
+
+            return revengeText ? (
+              <p className="text-[var(--dim)] italic text-base mt-3">{revengeText}</p>
+            ) : null;
+          })()}
+
+          {/* Countdown & buttons */}
           <div className="mt-4 flex flex-col gap-2">
-            <button
-              onClick={() => {
-                if (!restartReady) return;
-                socket.send(JSON.stringify({ type: 'restartGame', playerId }));
-                setSecretRoomFound(false);
-                roleRevealShownRef.current = false;
-              }}
-              className={`term-btn text-xl ${restartReady ? 'glow' : 'text-[var(--dim)]'}`}
-            >
-              {restartReady ? '[PLAY AGAIN — SAME GROUP]' : '[PLAY AGAIN — wait...]'}
+            <p className="text-[var(--green)] glow-green text-lg text-center tracking-widest">
+              NEXT ROUND IN: {restartCountdown}s
+            </p>
+            {gameState.hostId === playerId && restartCountdown > 0 && (
+              <button
+                onClick={() => {
+                  socket.send(JSON.stringify({ type: 'restartGame', playerId }));
+                }}
+                className="term-btn text-xl glow"
+              >
+                [START NOW]
+              </button>
+            )}
+            <button onClick={() => window.location.href = '/'} className="term-btn text-xl text-[var(--dim)]">
+              [LEAVE GAME]
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PRE-GAME (dramatic role assignment sequence) ──────────
+
+  if (gameState.phase === 'preGame') {
+    const connectedCount = gameState.connectedCount || Object.keys(gameState.players).length;
+    return (
+      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col justify-center">
+        <div className="text-center">
+          {divider()}
+          <p className="text-[var(--green)] glow-green text-2xl tracking-widest" style={{ animation: 'fadeIn 0.5s ease-in' }}>
+            REINITIALIZING SYSTEM...
+          </p>
+          <p className="text-[var(--dim)] text-lg mt-3" style={{ animation: 'fadeIn 1s ease-in' }}>
+            SCANNING PLAYERS... {connectedCount} CONNECTED
+          </p>
+          <p className="text-[var(--green)] glow-green text-lg mt-3" style={{ animation: 'fadeIn 2s ease-in' }}>
+            ASSIGNING ROLES...
+          </p>
+          {divider()}
+          <span className="cursor-blink text-xl mt-4 inline-block">&#9612;</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LOBBY FALLBACK (when hasPlayed but dropped to lobby) ──────────
+
+  if (gameState.phase === 'lobby' && hasPlayedRef.current) {
+    return (
+      <div className="min-h-screen p-4 max-w-lg mx-auto flex flex-col justify-center">
+        <div className="text-center">
+          {divider()}
+          <p className="text-[var(--dim)] text-xl tracking-widest">
+            WAITING FOR PLAYERS...
+          </p>
+          <p className="text-[var(--dim)] text-base mt-2">
+            Not enough players to auto-restart. {Object.keys(gameState.players).length} connected.
+          </p>
+          {divider()}
+          <div className="mt-4 flex flex-col gap-2">
+            <button onClick={() => router.push(`/lobby/${roomCode}`)} className="term-btn text-xl">
+              [GO TO LOBBY]
             </button>
             <button onClick={() => window.location.href = '/'} className="term-btn text-xl text-[var(--dim)]">
-              [NEW ROOM]
+              [LEAVE GAME]
             </button>
           </div>
         </div>

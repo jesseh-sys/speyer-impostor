@@ -1,6 +1,6 @@
 export type PlayerRole = 'innocent' | 'impostor';
 export type PlayerStatus = 'alive' | 'dead';
-export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'voting' | 'voteReveal' | 'results' | 'gameOver';
+export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'voting' | 'voteReveal' | 'results' | 'gameOver' | 'preGame';
 
 export type PowerupType = 'sixthSense' | 'radar' | 'shield' | 'shadowWalk' | 'tracker' | 'bloodhound';
 
@@ -122,6 +122,9 @@ export interface GameState {
   gameTimeRemaining?: number; // game clock seconds remaining (sent during meetings/voting/results)
   meetingLocations?: Record<string, string>; // playerId -> locationName at meeting start
   reportedBody?: { name: string; location: string; reportedBy: string }; // whose body triggered the meeting
+  restartCountdown?: { until: number }; // auto-restart countdown after game over
+  preGameTimer?: { until: number }; // preGame phase countdown before auto-start
+  connectedCount?: number; // number of connected players (sent during preGame)
 }
 
 export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame' | 'roleConfig' | 'investigate' | 'reportPhantom' | 'shapeshift';

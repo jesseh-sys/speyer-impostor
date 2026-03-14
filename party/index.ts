@@ -28,6 +28,8 @@ export default class GameServer implements Party.Server {
   private gameEventLog: Array<{ time: number; event: string }> = [];
   private gameStartTime: number = 0;
   private voteHistory: Array<{ votes: Record<string, string>; ejectedId?: string }> = [];
+  private restartCountdownTimer: ReturnType<typeof setTimeout> | null = null;
+  private preGameTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(readonly room: Party.Room) {}
 
@@ -95,7 +97,7 @@ export default class GameServer implements Party.Server {
         }
         // Clean up if this connection was previously mapped to a different player
         const previousId = this.connectionToPlayer.get(sender.id);
-        if (previousId && previousId !== msg.playerId && this.gameState.phase === 'lobby') {
+        if (previousId && previousId !== msg.playerId && (this.gameState.phase === 'lobby' || this.gameState.phase === 'preGame')) {
           delete this.gameState.players[previousId];
         }
         this.connectionToPlayer.set(sender.id, msg.playerId);
@@ -176,7 +178,9 @@ export default class GameServer implements Party.Server {
         this.handleShapeshift(msg);
         break;
       case 'restartGame':
-        this.handleRestartGame();
+        if (msg.playerId === this.hostId) {
+          this.handleRestartGame();
+        }
         break;
     }
 
@@ -198,7 +202,7 @@ export default class GameServer implements Party.Server {
     if (this.gameState.players[playerId]) {
       console.log('Player reconnected:', playerId);
       // Don't allow appearance changes mid-game
-      if (this.gameState.phase === 'lobby') {
+      if (this.gameState.phase === 'lobby' || this.gameState.phase === 'preGame') {
         // Dedup against other players before updating
         const others = Object.values(this.gameState.players).filter(p => p.id !== playerId);
         const takenNames = new Set(others.map(p => p.name));
@@ -224,8 +228,8 @@ export default class GameServer implements Party.Server {
       return;
     }
 
-    // New players can only join during lobby
-    if (this.gameState.phase !== 'lobby') return;
+    // New players can only join during lobby or preGame
+    if (this.gameState.phase !== 'lobby' && this.gameState.phase !== 'preGame') return;
 
     // Enforce max player limit
     if (Object.keys(this.gameState.players).length >= GAME_CONFIG.MAX_PLAYERS) return;
@@ -276,7 +280,7 @@ export default class GameServer implements Party.Server {
   }
 
   handleRoleConfig(msg: ClientMessage) {
-    if (!this.gameState || this.gameState.phase !== 'lobby') return;
+    if (!this.gameState || (this.gameState.phase !== 'lobby' && this.gameState.phase !== 'preGame')) return;
     // Only host can change role config
     if (msg.playerId !== this.hostId) return;
     const { role, enabled } = msg.data as { role: SpecialRole; enabled: boolean };
@@ -1192,6 +1196,14 @@ export default class GameServer implements Party.Server {
       clearTimeout(this.gameTimerHandle);
       this.gameTimerHandle = null;
     }
+    if (this.restartCountdownTimer) {
+      clearTimeout(this.restartCountdownTimer);
+      this.restartCountdownTimer = null;
+    }
+    if (this.preGameTimer) {
+      clearTimeout(this.preGameTimer);
+      this.preGameTimer = null;
+    }
     this.disconnectTimers.forEach(t => clearTimeout(t));
     this.disconnectTimers.clear();
 
@@ -1221,6 +1233,15 @@ export default class GameServer implements Party.Server {
 
     // Calculate awards
     this.gameState.awards = this.calculateAwards();
+
+    // Start auto-restart countdown (20 seconds)
+    const restartUntil = Date.now() + 20000;
+    this.gameState.restartCountdown = { until: restartUntil };
+    if (this.restartCountdownTimer) clearTimeout(this.restartCountdownTimer);
+    this.restartCountdownTimer = setTimeout(() => {
+      this.restartCountdownTimer = null;
+      this.autoRestart();
+    }, 20000);
 
     this.broadcastFiltered();
   }
@@ -1364,22 +1385,45 @@ export default class GameServer implements Party.Server {
     return awards;
   }
 
-  handleRestartGame() {
-    if (!this.gameState) return;
-    // Only allow restart when game is over
-    if (this.gameState.phase !== 'gameOver') return;
+  private getConnectedPlayerCount(): number {
+    const connectedPlayerIds = new Set(this.connectionToPlayer.values());
+    if (!this.gameState) return 0;
+    return Object.keys(this.gameState.players).filter(id => connectedPlayerIds.has(id)).length;
+  }
 
-    // Clear all timers
-    this.meetingTimers.forEach(t => clearTimeout(t));
-    this.meetingTimers = [];
-    this.ephemeralTimers.forEach(t => clearTimeout(t));
-    this.ephemeralTimers = [];
-    if (this.gameTimerHandle) {
-      clearTimeout(this.gameTimerHandle);
-      this.gameTimerHandle = null;
+  private autoRestart() {
+    if (!this.gameState || this.gameState.phase !== 'gameOver') return;
+
+    // Check if enough connected players to auto-start
+    const connectedCount = this.getConnectedPlayerCount();
+    if (connectedCount < GAME_CONFIG.MIN_PLAYERS) {
+      // Fall back to lobby — not enough players
+      this.resetToLobby();
+      this.broadcastFiltered();
+      return;
     }
 
-    // Reset all players to lobby state, keep names/icons/colors
+    // Remove disconnected players before restarting
+    this.removeDisconnectedPlayers();
+
+    // Go to preGame phase
+    this.enterPreGame();
+  }
+
+  private removeDisconnectedPlayers() {
+    if (!this.gameState) return;
+    const connectedPlayerIds = new Set(this.connectionToPlayer.values());
+    for (const id of Object.keys(this.gameState.players)) {
+      if (!connectedPlayerIds.has(id)) {
+        delete this.gameState.players[id];
+      }
+    }
+  }
+
+  private enterPreGame() {
+    if (!this.gameState) return;
+
+    // Reset players for new game, keep names/icons/colors
     for (const player of Object.values(this.gameState.players)) {
       player.role = 'innocent';
       player.specialRole = undefined;
@@ -1393,8 +1437,7 @@ export default class GameServer implements Party.Server {
       player.survivorShields = undefined;
     }
 
-    // Reset game state
-    this.gameState.phase = 'lobby';
+    // Reset game state fields
     this.gameState.tasks = [];
     this.gameState.chat = [];
     this.gameState.ghostChat = [];
@@ -1411,6 +1454,7 @@ export default class GameServer implements Party.Server {
     this.gameState.survivorWin = undefined;
     this.gameState.eventLog = undefined;
     this.gameState.awards = undefined;
+    this.gameState.restartCountdown = undefined;
     this.gameState.locations = LOCATIONS.map(l => ({ ...l, connectedTo: [...l.connectedTo] }));
 
     // Reset server-side tracking
@@ -1432,6 +1476,137 @@ export default class GameServer implements Party.Server {
     this.voteHistory = [];
     this.disconnectTimers.forEach(t => clearTimeout(t));
     this.disconnectTimers.clear();
+
+    // Enter preGame phase with 8-second timer
+    const preGameUntil = Date.now() + 8000;
+    this.gameState.phase = 'preGame';
+    this.gameState.preGameTimer = { until: preGameUntil };
+    this.gameState.connectedCount = Object.keys(this.gameState.players).length;
+
+    if (this.preGameTimer) clearTimeout(this.preGameTimer);
+    this.preGameTimer = setTimeout(() => {
+      this.preGameTimer = null;
+      if (!this.gameState || this.gameState.phase !== 'preGame') return;
+
+      // Final check: still enough players?
+      const count = this.getConnectedPlayerCount();
+      if (count < GAME_CONFIG.MIN_PLAYERS) {
+        this.resetToLobby();
+        this.broadcastFiltered();
+        return;
+      }
+
+      // Auto-start the game
+      this.handleStartGame();
+      this.broadcastFiltered();
+    }, 8000);
+
+    this.broadcastFiltered();
+  }
+
+  private resetToLobby() {
+    if (!this.gameState) return;
+
+    // Clear countdown/preGame timers
+    if (this.restartCountdownTimer) {
+      clearTimeout(this.restartCountdownTimer);
+      this.restartCountdownTimer = null;
+    }
+    if (this.preGameTimer) {
+      clearTimeout(this.preGameTimer);
+      this.preGameTimer = null;
+    }
+
+    // Clear all other timers
+    this.meetingTimers.forEach(t => clearTimeout(t));
+    this.meetingTimers = [];
+    this.ephemeralTimers.forEach(t => clearTimeout(t));
+    this.ephemeralTimers = [];
+    if (this.gameTimerHandle) {
+      clearTimeout(this.gameTimerHandle);
+      this.gameTimerHandle = null;
+    }
+
+    // Reset all players to lobby state
+    for (const player of Object.values(this.gameState.players)) {
+      player.role = 'innocent';
+      player.specialRole = undefined;
+      player.status = 'alive';
+      player.location = 'speyer';
+      player.tasksCompleted = 0;
+      player.totalTasks = GAME_CONFIG.TASKS_PER_PLAYER;
+      player.powerup = undefined;
+      player.ghostVoteUsed = false;
+      player.disguise = undefined;
+      player.survivorShields = undefined;
+    }
+
+    this.gameState.phase = 'lobby';
+    this.gameState.tasks = [];
+    this.gameState.chat = [];
+    this.gameState.ghostChat = [];
+    this.gameState.votes = {};
+    this.gameState.deadBodies = [];
+    this.gameState.timer = undefined;
+    this.gameState.winner = undefined;
+    this.gameState.lightsOut = undefined;
+    this.gameState.doorsLocked = undefined;
+    this.gameState.secretRoomMethod = undefined;
+    this.gameState.secretRoomEntrance = undefined;
+    this.gameState.scrambled = undefined;
+    this.gameState.phantomGlitch = undefined;
+    this.gameState.survivorWin = undefined;
+    this.gameState.eventLog = undefined;
+    this.gameState.awards = undefined;
+    this.gameState.restartCountdown = undefined;
+    this.gameState.preGameTimer = undefined;
+    this.gameState.connectedCount = undefined;
+    this.gameState.locations = LOCATIONS.map(l => ({ ...l, connectedTo: [...l.connectedTo] }));
+
+    this.lastKillTimes = {};
+    this.lastMeetingTime = 0;
+    this.lastSabotageTime = 0;
+    this.lastEjection = undefined;
+    this.gameTimeRemaining = 0;
+    this._gameTimerStartedAt = 0;
+    this.meetingsCalled = new Set();
+    this.meetingLocations = {};
+    this.reportedBody = undefined;
+    this.lastChatTimes = {};
+    this.lastInvestigateTime = {};
+    this.lastShapeshiftTime = {};
+    this.phantomGlitchKillerId = null;
+    this.gameEventLog = [];
+    this.gameStartTime = 0;
+    this.voteHistory = [];
+    this.disconnectTimers.forEach(t => clearTimeout(t));
+    this.disconnectTimers.clear();
+  }
+
+  handleRestartGame() {
+    if (!this.gameState) return;
+    // Only allow during gameOver (host can skip countdown)
+    if (this.gameState.phase !== 'gameOver') return;
+
+    // Cancel the auto-restart countdown
+    if (this.restartCountdownTimer) {
+      clearTimeout(this.restartCountdownTimer);
+      this.restartCountdownTimer = null;
+    }
+
+    // Check if enough connected players
+    const connectedCount = this.getConnectedPlayerCount();
+    if (connectedCount < GAME_CONFIG.MIN_PLAYERS) {
+      this.resetToLobby();
+      this.broadcastFiltered();
+      return;
+    }
+
+    // Remove disconnected players
+    this.removeDisconnectedPlayers();
+
+    // Go to preGame
+    this.enterPreGame();
   }
 
   // Send per-player filtered state to each connection
@@ -1453,7 +1628,7 @@ export default class GameServer implements Party.Server {
 
   // Mask all roles as 'innocent' (safe default for unknown connections)
   maskRoles(gs: GameState): GameState {
-    if (gs.phase === 'gameOver') return gs; // Roles revealed at game over
+    if (gs.phase === 'gameOver' || gs.phase === 'preGame') return gs; // Roles revealed at game over, no roles during preGame
     const filteredPlayers: Record<string, Player> = {};
     for (const [id, p] of Object.entries(gs.players)) {
       filteredPlayers[id] = { ...p, role: 'innocent', specialRole: undefined, powerup: undefined };
@@ -1471,6 +1646,9 @@ export default class GameServer implements Party.Server {
 
     // During game over, reveal everything (eventLog and awards are already on gs)
     if (gs.phase === 'gameOver') return gs;
+
+    // During preGame, send full state (no roles assigned yet)
+    if (gs.phase === 'preGame') return gs;
 
     const isImpostor = player.role === 'impostor';
     const isDead = player.status === 'dead';
@@ -1650,9 +1828,13 @@ export default class GameServer implements Party.Server {
       this.gameState.hostId = this.hostId || undefined;
     }
 
-    // In lobby: remove the player entirely
-    if (this.gameState.phase === 'lobby') {
+    // In lobby or preGame: remove the player entirely
+    if (this.gameState.phase === 'lobby' || this.gameState.phase === 'preGame') {
       delete this.gameState.players[playerId];
+      // If preGame and now below MIN_PLAYERS, fall back to lobby
+      if (this.gameState.phase === 'preGame' && Object.keys(this.gameState.players).length < GAME_CONFIG.MIN_PLAYERS) {
+        this.resetToLobby();
+      }
       this.broadcastFiltered();
       return;
     }
@@ -1669,7 +1851,7 @@ export default class GameServer implements Party.Server {
 
     const timer = setTimeout(() => {
       if (!this.gameState?.players[playerId] || this.gameState.players[playerId].status !== 'alive') return;
-      if (this.gameState.phase === 'lobby' || this.gameState.phase === 'gameOver') return;
+      if (this.gameState.phase === 'lobby' || this.gameState.phase === 'gameOver' || this.gameState.phase === 'preGame') return;
       this.gameState.players[playerId].status = 'dead';
       this.disconnectTimers.delete(playerId);
       this.checkWinCondition();
