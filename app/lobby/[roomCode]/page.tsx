@@ -18,7 +18,10 @@ export default function Lobby() {
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
     room: roomCode,
     onMessage(event) {
-      const msg = JSON.parse(event.data);
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch { return; }
       if (msg.type === 'gameState') {
         setGameState(msg.data);
         if (msg.data.phase !== 'lobby') {

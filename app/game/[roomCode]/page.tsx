@@ -397,7 +397,10 @@ export default function Game() {
     host: process.env.NEXT_PUBLIC_PARTYKIT_HOST || 'localhost:1999',
     room: roomCode,
     onMessage(event) {
-      const msg = JSON.parse(event.data);
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch { return; }
       if (msg.type === 'gameState') {
         // Check if a pending kill failed (not shield — that has its own message)
         const victimId = pendingKillRef.current;
@@ -1526,7 +1529,8 @@ export default function Game() {
   if (gameState.phase === 'voting') {
     const alivePlayers = Object.values(gameState.players).filter(p => p.status === 'alive');
     const hasVoted = gameState.votes[playerId] !== undefined;
-    const votesCast = Object.keys(gameState.votes).length;
+    const aliveVotes = Object.keys(gameState.votes).filter(id => alivePlayers.some(p => p.id === id)).length;
+    const ghostVotes = Object.keys(gameState.votes).filter(id => !alivePlayers.some(p => p.id === id)).length;
     const totalVoters = alivePlayers.length;
     const commsJamDuringVoting = gameState.commsJam && Date.now() < gameState.commsJam.until;
 
@@ -1552,14 +1556,14 @@ export default function Game() {
           <p className="text-[var(--green)] glow-green text-center text-2xl tracking-widest">V O T E</p>
           <p className="text-[var(--green)] text-center glow-green">[{formatTime(timeLeft)}]</p>
           {/* Vote progress */}
-          <p className="text-[var(--dim)] text-center text-base">Votes: {votesCast}/{totalVoters}</p>
+          <p className="text-[var(--dim)] text-center text-base">Votes: {aliveVotes}/{totalVoters}{ghostVotes > 0 ? ` (+${ghostVotes} ghost)` : ''}</p>
           {divider()}
 
           {currentPlayer.status === 'dead' ? (
             gameState.ghostVoteAvailable ? (
               hasVoted ? (
                 <div className="mt-4">
-                  <p className="text-[var(--dim)]">GHOST VOTE CAST. Waiting for others... ({votesCast}/{totalVoters})</p>
+                  <p className="text-[var(--dim)]">GHOST VOTE CAST. Waiting for others... ({aliveVotes}/{totalVoters})</p>
                 </div>
               ) : (
                 <div className="mt-4">
@@ -1575,7 +1579,6 @@ export default function Game() {
                       <span style={{ color: p.color }}>
                         {p.name}
                       </span>
-                      {p.role === 'impostor' && <span className="text-[var(--red)]"> [IMP]</span>}
                     </button>
                   ))}
                   <button
@@ -1591,7 +1594,7 @@ export default function Game() {
             )
           ) : hasVoted ? (
             <div className="mt-4">
-              <p className="text-[var(--dim)]">Vote cast. Waiting for others... ({votesCast}/{totalVoters})</p>
+              <p className="text-[var(--dim)]">Vote cast. Waiting for others... ({aliveVotes}/{totalVoters}{ghostVotes > 0 ? ` (+${ghostVotes} ghost)` : ''})</p>
             </div>
           ) : (
             <div className="mt-4">
@@ -1962,7 +1965,7 @@ export default function Game() {
                 const padded = ` ${label}${label.length < 3 ? ' ' : ''}`;
                 const isCurrent = el.id === currentPlayer.location;
                 const hasTask = allMyTasks.some(t => t.location === el.id && !completedFakeTasks.has(t.id));
-                const cls = isCurrent ? 'text-[var(--green)] glow-green' : hasTask ? 'text-[var(--green)]' : 'text-[var(--dim)]';
+                const cls = isCurrent ? 'text-[var(--green)] glow-green' : hasTask ? 'text-[var(--amber)]' : 'text-[var(--dim)]';
                 return <span key={ei} className={cls}>{isCurrent ? `[${label}]` : padded}</span>;
               })}
             </div>
@@ -2122,7 +2125,11 @@ export default function Game() {
 
       {/* Players here */}
       <div className="mb-4">
-        {visibleOthers.length > 0 ? (
+        {gameState.blackout && gameState.blackout.until > Date.now() && currentPlayer.role !== 'impostor' && currentPlayer.status !== 'dead' ? (
+          <p className="text-[var(--dim)] text-lg">
+            You see: NOTHING. The darkness is total.
+          </p>
+        ) : visibleOthers.length > 0 ? (
           <p className="text-lg">
             <span className="text-[var(--dim)]">You see: </span>
             {visibleOthers.map((p, i) => (
@@ -2188,8 +2195,9 @@ export default function Game() {
 
       {currentPlayer.status === 'alive' ? (
         <>
-          {/* Dead bodies */}
-          {gameState.deadBodies?.filter(b => b.location === currentPlayer.location).map(body => (
+          {/* Dead bodies — hidden during blackout for innocents */}
+          {!(gameState.blackout && gameState.blackout.until > Date.now() && currentPlayer.role !== 'impostor') &&
+          gameState.deadBodies?.filter(b => b.location === currentPlayer.location).map(body => (
             <div key={body.playerId} className="mb-4">
               <p className="text-[var(--red)] glow-red text-lg">
                 {`${gameState.players[body.playerId]?.name || 'Someone'} lies motionless on the ground.`}
@@ -2507,7 +2515,7 @@ export default function Game() {
       {flavorLines.length > 0 && (
         <div className="mt-4">
           {flavorLines.map((line, i) => {
-            const isGrue = line.includes('grue') || line.includes('getting dark') || line.includes('flee in terror');
+            const isGrue = line.includes('grue') || line.includes('getting dark') || line.includes('flee in terror') || line.includes('shadows are closing') || line.includes('Something is watching') || line.includes('MOVE.') || line.includes('Something grabbed you');
             return (
               <p key={i} className={`text-base italic ${isGrue ? 'text-[var(--green)] glow-green' : 'text-[var(--dim)]'}`}>{line}</p>
             );

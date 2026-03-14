@@ -27,6 +27,11 @@ export function HackTerminal({ onComplete, onCancel }: MiniGameProps) {
   const [timeLeft, setTimeLeft] = useState(8);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRefs = useRef<NodeJS.Timeout[]>([]);
+
+  useEffect(() => {
+    return () => { timerRefs.current.forEach(clearTimeout); };
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -53,7 +58,8 @@ export function HackTerminal({ onComplete, onCancel }: MiniGameProps) {
     setInput('');
     setStatus('entering');
     setTimeLeft(8);
-    setTimeout(() => inputRef.current?.focus(), 50);
+    const id = setTimeout(() => inputRef.current?.focus(), 50);
+    timerRefs.current.push(id);
   };
 
   const handleInputChange = (value: string) => {
@@ -65,7 +71,8 @@ export function HackTerminal({ onComplete, onCancel }: MiniGameProps) {
         if (timerRef.current) clearInterval(timerRef.current);
         audio.miniGameSuccess();
         haptics.success();
-        setTimeout(onComplete, 800);
+        const id = setTimeout(onComplete, 800);
+        timerRefs.current.push(id);
       } else {
         setStatus('denied');
         if (timerRef.current) clearInterval(timerRef.current);
@@ -150,6 +157,11 @@ export function DefragDrive({ onComplete, onCancel }: MiniGameProps) {
   const [nextExpected, setNextExpected] = useState(1);
   const [tapped, setTapped] = useState<Set<number>>(new Set());
   const [status, setStatus] = useState<'playing' | 'error' | 'done'>('playing');
+  const timerRefs = useRef<NodeJS.Timeout[]>([]);
+
+  useEffect(() => {
+    return () => { timerRefs.current.forEach(clearTimeout); };
+  }, []);
 
   const handleTap = (blockNum: number) => {
     if (status === 'done') return;
@@ -163,7 +175,8 @@ export function DefragDrive({ onComplete, onCancel }: MiniGameProps) {
         setStatus('done');
         audio.miniGameSuccess();
         haptics.success();
-        setTimeout(onComplete, 800);
+        const id = setTimeout(onComplete, 800);
+        timerRefs.current.push(id);
       } else {
         setNextExpected(blockNum + 1);
       }
@@ -171,12 +184,13 @@ export function DefragDrive({ onComplete, onCancel }: MiniGameProps) {
       setStatus('error');
       audio.miniGameFail();
       haptics.light();
-      setTimeout(() => {
+      const id = setTimeout(() => {
         setPositions(shufflePositions());
         setNextExpected(1);
         setTapped(new Set());
         setStatus('playing');
       }, 600);
+      timerRefs.current.push(id);
     }
   };
 
@@ -249,6 +263,11 @@ export function DecodeSignal({ onComplete, onCancel }: MiniGameProps) {
   const [pattern, setPattern] = useState(generatePattern);
   const [entered, setEntered] = useState<string[]>([]);
   const [status, setStatus] = useState<'playing' | 'error' | 'done'>('playing');
+  const timerRefs = useRef<NodeJS.Timeout[]>([]);
+
+  useEffect(() => {
+    return () => { timerRefs.current.forEach(clearTimeout); };
+  }, []);
 
   const handleSymbolTap = (symbol: string) => {
     if (status === 'done') return;
@@ -259,10 +278,11 @@ export function DecodeSignal({ onComplete, onCancel }: MiniGameProps) {
       setStatus('error');
       audio.miniGameFail();
       haptics.light();
-      setTimeout(() => {
+      const id = setTimeout(() => {
         setEntered([]);
         setStatus('playing');
       }, 500);
+      timerRefs.current.push(id);
       return;
     }
 
@@ -273,7 +293,8 @@ export function DecodeSignal({ onComplete, onCancel }: MiniGameProps) {
       setStatus('done');
       audio.miniGameSuccess();
       haptics.success();
-      setTimeout(onComplete, 800);
+      const id2 = setTimeout(onComplete, 800);
+      timerRefs.current.push(id2);
     }
   };
 
@@ -355,6 +376,11 @@ export function CrackPassword({ onComplete, onCancel }: MiniGameProps) {
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<'entering' | 'cracked' | 'wrong'>('entering');
   const inputRef = useRef<HTMLInputElement>(null);
+  const timerRefs = useRef<NodeJS.Timeout[]>([]);
+
+  useEffect(() => {
+    return () => { timerRefs.current.forEach(clearTimeout); };
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -370,16 +396,18 @@ export function CrackPassword({ onComplete, onCancel }: MiniGameProps) {
       setStatus('cracked');
       audio.miniGameSuccess();
       haptics.success();
-      setTimeout(onComplete, 800);
+      const id = setTimeout(onComplete, 800);
+      timerRefs.current.push(id);
     } else {
       setStatus('wrong');
       audio.miniGameFail();
       haptics.light();
-      setTimeout(() => {
+      const id = setTimeout(() => {
         setStatus('entering');
         setInput('');
         inputRef.current?.focus();
       }, 800);
+      timerRefs.current.push(id);
     }
   }, [input, word, onComplete]);
 
