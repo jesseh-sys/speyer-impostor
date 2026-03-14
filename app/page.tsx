@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLAYER_COLORS } from '@/lib/gameConfig';
+import { audio } from './game/lib/audio';
 
 const BOOT_LINES = [
   'SPEYER-OS v3.14',
@@ -19,7 +20,23 @@ export default function Home() {
   const [selectedColor, setSelectedColor] = useState('#00ff41');
   const [showJoin, setShowJoin] = useState(false);
   const [roomCode, setRoomCode] = useState('');
+  const [audioOn, setAudioOn] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    audio.loadPreference();
+    setAudioOn(audio.isEnabled());
+  }, []);
+
+  const toggleAudio = useCallback(() => {
+    if (audio.isEnabled()) {
+      audio.disable();
+      setAudioOn(false);
+    } else {
+      audio.enable();
+      setAudioOn(true);
+    }
+  }, []);
 
   useEffect(() => {
     const timers: NodeJS.Timeout[] = [];
@@ -51,6 +68,14 @@ export default function Home() {
 
   return (
     <div className="min-h-screen p-4 max-w-lg mx-auto">
+      {/* Audio toggle */}
+      <button
+        onClick={toggleAudio}
+        className="fixed top-2 right-2 z-50 text-[var(--dim)] text-xs px-2 py-1 border border-[var(--dim)] bg-black opacity-60 hover:opacity-100"
+      >
+        {audioOn ? '\u266A ON' : '\u266A OFF'}
+      </button>
+
       {/* Boot sequence */}
       <div className="mt-4 mb-3">
         {BOOT_LINES.slice(0, bootStep).map((line, i) => (

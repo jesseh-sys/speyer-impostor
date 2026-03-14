@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
 import { GameState, Location, MiniGameType } from '@/types/game';
 import { HackTerminal, DefragDrive, DecodeSignal, CrackPassword } from '../components/MiniGames';
+import { audio } from '../lib/audio';
+import { haptics } from '../lib/haptics';
 import {
   NarrativeTemplate,
   getTravelNarrative,
@@ -182,11 +184,14 @@ function VoteRevealScreen({ gameState, gameClockSeconds, divider }: {
     for (let i = 0; i < totalVotes; i++) {
       timers.push(setTimeout(() => {
         setRevealedCount(i + 1);
+        audio.voteReveal();
       }, 800 + i * 600));
     }
     // Show verdict after all votes revealed + a dramatic pause
     timers.push(setTimeout(() => {
       setShowVerdict(true);
+      audio.verdict();
+      haptics.heavy();
     }, 800 + totalVotes * 600 + 1000));
 
     return () => timers.forEach(t => clearTimeout(t));
@@ -317,6 +322,9 @@ export default function Game() {
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
 
+  // Track player death for sound
+  const prevStatusRef = useRef<string | undefined>(undefined);
+
   // Role reveal overlay
   const [showRoleReveal, setShowRoleReveal] = useState(false);
   const roleRevealShownRef = useRef(false);
@@ -333,6 +341,10 @@ export default function Game() {
 
   // Restart countdown timer
   const [restartCountdown, setRestartCountdown] = useState(0);
+
+  // Audio toggle
+  const [audioOn, setAudioOn] = useState(false);
+  const [showAudioPrompt, setShowAudioPrompt] = useState(false);
 
   // Session stats
   interface SessionStats {
@@ -355,6 +367,30 @@ export default function Game() {
     return { gamesPlayed: 0, wins: 0, losses: 0, kills: 0, tasksCompleted: 0, timesImpostor: 0, timesEjected: 0, currentStreak: 0 };
   });
   const sessionStatsUpdatedRef = useRef(false);
+
+  // Audio initialization
+  useEffect(() => {
+    audio.loadPreference();
+    const isOn = audio.isEnabled();
+    setAudioOn(isOn);
+    if (!audio.hasPreference()) {
+      setShowAudioPrompt(true);
+      const t = setTimeout(() => setShowAudioPrompt(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const toggleAudio = useCallback(() => {
+    if (audio.isEnabled()) {
+      audio.disable();
+      setAudioOn(false);
+    } else {
+      audio.enable();
+      setAudioOn(true);
+    }
+    setShowAudioPrompt(false);
+    haptics.light();
+  }, []);
 
   const socketRef = useRef<ReturnType<typeof usePartySocket> | null>(null);
   const socket = usePartySocket({
@@ -434,7 +470,17 @@ export default function Game() {
       setTimeLeft(Math.max(0, gameState.timer!.duration - elapsed));
     };
     update();
-    const interval = setInterval(update, 1000);
+    const interval = setInterval(() => {
+      update();
+      // Timer tick for last 10 seconds
+      if (gameState?.timer) {
+        const elapsed = Math.floor((Date.now() - gameState.timer.startTime) / 1000);
+        const remaining = Math.max(0, gameState.timer.duration - elapsed);
+        if (remaining > 0 && remaining <= 10) {
+          audio.timerTick();
+        }
+      }
+    }, 1000);
     return () => clearInterval(interval);
   }, [gameState?.timer?.startTime, gameState?.timer?.duration]);
 
@@ -445,10 +491,11 @@ export default function Game() {
     }
   }, [gameState?.phase]);
 
-  // Mark as "has played" when game starts
+  // Mark as "has played" when game starts + game start sound
   useEffect(() => {
     if (gameState?.phase === 'playing') {
       hasPlayedRef.current = true;
+      audio.gameStart();
     }
   }, [gameState?.phase]);
 
@@ -456,6 +503,13 @@ export default function Game() {
   // If a meeting/vote/results/gameOver starts while player is in a narrative,
   // dismiss it immediately so they can participate
   useEffect(() => {
+    if (gameState?.phase === 'meeting') {
+      audio.meetingAlarm();
+      haptics.alarm();
+    }
+    if (gameState?.phase === 'voteReveal') {
+      // Sound handled per-vote in VoteRevealScreen
+    }
     if (gameState?.phase && gameState.phase !== 'playing') {
       // Clear pending kill state so "Kill failed" doesn't show during meetings
       pendingKillRef.current = null;
@@ -504,7 +558,10 @@ export default function Game() {
       const t = setTimeout(() => setShowChoices(true), 200);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setRevealedLines(r => r + 1), 200);
+    const t = setTimeout(() => {
+      setRevealedLines(r => r + 1);
+      audio.keyClick();
+    }, 200);
     return () => clearTimeout(t);
   }, [narrative, revealedLines, resultText]);
 
@@ -596,13 +653,30 @@ export default function Game() {
     if (gameState?.phase === 'gameOver' && gameState.restartCountdown) {
       const update = () => {
         const remaining = Math.max(0, Math.ceil((gameState.restartCountdown!.until - Date.now()) / 1000));
-        setRestartCountdown(remaining);
+        setRestartCountdown(prev => {
+          if (remaining !== prev && remaining > 0 && remaining <= 10) {
+            audio.countdown();
+          }
+          return remaining;
+        });
       };
       update();
       const interval = setInterval(update, 1000);
       return () => clearInterval(interval);
     }
   }, [gameState?.phase, gameState?.restartCountdown?.until]);
+
+  // ── Game over sounds ─────────────────
+  useEffect(() => {
+    if (gameState?.phase === 'gameOver') {
+      if (gameState.winner === 'jester') {
+        audio.jesterReveal();
+      } else {
+        audio.verdict();
+        haptics.heavy();
+      }
+    }
+  }, [gameState?.phase, gameState?.winner]);
 
   // ── Session stats update on game over ─────────────────
   useEffect(() => {
@@ -664,6 +738,8 @@ export default function Game() {
       if (elapsed < 10000) {
         roleRevealShownRef.current = true;
         setShowRoleReveal(true);
+        const isImp = currentPlayer?.role === 'impostor';
+        audio.roleReveal(isImp || currentPlayer?.specialRole === 'jester');
         setTimeout(() => setShowRoleReveal(false), 4000);
       }
     }
@@ -684,10 +760,23 @@ export default function Game() {
     const count = currentPlayer?.tasksCompleted ?? 0;
     if (prevTaskCountRef.current !== null && count > prevTaskCountRef.current) {
       setTaskCompleteBanner(true);
+      audio.taskComplete();
+      haptics.success();
       setTimeout(() => setTaskCompleteBanner(false), 2000);
     }
     prevTaskCountRef.current = count;
   }, [currentPlayer?.tasksCompleted]);
+
+  // ── Player death detection (sound + haptics) ──────────
+  useEffect(() => {
+    const status = currentPlayer?.status;
+    if (prevStatusRef.current === 'alive' && status === 'dead') {
+      audio.killed();
+      haptics.death();
+      audio.ghostAmbient();
+    }
+    prevStatusRef.current = status;
+  }, [currentPlayer?.status]);
 
   // ── Body discovery ──────────────────────────
 
@@ -805,6 +894,7 @@ export default function Game() {
   // ── Action handlers ───────────────────────────
 
   const handleMove = (locationId: string) => {
+    haptics.light();
     // Send move immediately
     socket.send(JSON.stringify({ type: 'move', playerId, data: { location: locationId } }));
     // Show narrative as flavor (autoResolve — both choices are no-ops)
@@ -824,6 +914,8 @@ export default function Game() {
     discoveredBodiesRef.current.add(victimId);
     pendingKillRef.current = victimId;
     setKillPending(true);
+    audio.kill();
+    haptics.double();
     socket.send(JSON.stringify({ type: 'kill', playerId, data: { victimId } }));
     // Show kill narrative as flavor
     const victim = gameState?.players[victimId];
@@ -920,6 +1012,8 @@ export default function Game() {
   };
 
   const handleVote = (votedForId: string) => {
+    haptics.medium();
+    audio.keyClick();
     socket.send(JSON.stringify({ type: 'vote', playerId, data: { votedForId } }));
   };
 
@@ -1171,6 +1265,7 @@ export default function Game() {
     };
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
+        <button onClick={toggleAudio} className="fixed top-2 right-2 z-50 text-[var(--dim)] text-xs px-2 py-1 border border-[var(--dim)] bg-black opacity-60 hover:opacity-100">{audioOn ? '\u266A ON' : '\u266A OFF'}</button>
 
         <div className="mt-4">
           {divider()}
@@ -1437,6 +1532,7 @@ export default function Game() {
 
     return (
       <div className={`min-h-screen p-4 max-w-lg mx-auto ${commsJamDuringVoting ? 'comms-static' : ''}`}>
+        <button onClick={toggleAudio} className="fixed top-2 right-2 z-50 text-[var(--dim)] text-xs px-2 py-1 border border-[var(--dim)] bg-black opacity-60 hover:opacity-100">{audioOn ? '\u266A ON' : '\u266A OFF'}</button>
 
         {/* Comms Jam warning banner */}
         {commsJamDuringVoting && (
@@ -1532,6 +1628,7 @@ export default function Game() {
     const commsJamDuringMeeting = gameState.commsJam && Date.now() < gameState.commsJam.until;
     return (
       <div className={`min-h-screen p-4 max-w-lg mx-auto flex flex-col ${commsJamDuringMeeting ? 'comms-static' : ''}`}>
+        <button onClick={toggleAudio} className="fixed top-2 right-2 z-50 text-[var(--dim)] text-xs px-2 py-1 border border-[var(--dim)] bg-black opacity-60 hover:opacity-100">{audioOn ? '\u266A ON' : '\u266A OFF'}</button>
 
         {/* Comms Jam warning banner */}
         {commsJamDuringMeeting && (
@@ -1727,6 +1824,21 @@ export default function Game() {
     <div className={`min-h-screen p-4 max-w-lg mx-auto pb-16 ${isBlackout && !isImpostor && currentPlayer.status === 'alive' ? 'blackout-active' : ''}`}>
       {roleRevealOverlay}
       {taskBanner}
+
+      {/* Audio toggle */}
+      <button
+        onClick={toggleAudio}
+        className="fixed top-2 right-2 z-50 text-[var(--dim)] text-xs px-2 py-1 border border-[var(--dim)] bg-black opacity-60 hover:opacity-100"
+      >
+        {audioOn ? '\u266A ON' : '\u266A OFF'}
+      </button>
+
+      {/* Audio prompt */}
+      {showAudioPrompt && (
+        <div className="fixed top-10 right-2 z-50 text-[var(--dim)] text-xs px-2 py-1 border border-[var(--dim)] bg-black" style={{ animation: 'fadeIn 0.3s ease-in' }}>
+          AUDIO SYSTEMS OFFLINE
+        </div>
+      )}
 
       {/* Blackout overlay for innocents */}
       {isBlackout && !isImpostor && currentPlayer.status === 'alive' && (
@@ -2134,6 +2246,8 @@ export default function Game() {
                       <button
                         className="term-btn term-btn-red text-base"
                         onClick={() => {
+                          audio.sabotageAlert();
+                          haptics.alarm();
                           socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'commsJam' } }));
                           setShowSabotagePanel(false);
                         }}
@@ -2143,6 +2257,8 @@ export default function Game() {
                       <button
                         className="term-btn term-btn-red text-base"
                         onClick={() => {
+                          audio.sabotageAlert();
+                          haptics.alarm();
                           socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'blackout' } }));
                           setShowSabotagePanel(false);
                         }}
@@ -2152,6 +2268,8 @@ export default function Game() {
                       <button
                         className="term-btn term-btn-red text-base"
                         onClick={() => {
+                          audio.sabotageAlert();
+                          haptics.alarm();
                           socket.send(JSON.stringify({ type: 'sabotage', playerId, data: { type: 'scramble' } }));
                           setShowSabotagePanel(false);
                         }}

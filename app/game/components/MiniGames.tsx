@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { audio } from '../lib/audio';
+import { haptics } from '../lib/haptics';
 
 export interface MiniGameProps {
   onComplete: () => void;
@@ -36,6 +38,8 @@ export function HackTerminal({ onComplete, onCancel }: MiniGameProps) {
         if (prev <= 1) {
           clearInterval(timerRef.current!);
           setStatus('denied');
+          audio.miniGameFail();
+          haptics.light();
           return 0;
         }
         return prev - 1;
@@ -59,10 +63,14 @@ export function HackTerminal({ onComplete, onCancel }: MiniGameProps) {
       if (upper === code) {
         setStatus('granted');
         if (timerRef.current) clearInterval(timerRef.current);
+        audio.miniGameSuccess();
+        haptics.success();
         setTimeout(onComplete, 800);
       } else {
         setStatus('denied');
         if (timerRef.current) clearInterval(timerRef.current);
+        audio.miniGameFail();
+        haptics.light();
       }
     }
   };
@@ -149,14 +157,20 @@ export function DefragDrive({ onComplete, onCancel }: MiniGameProps) {
       const newTapped = new Set(tapped);
       newTapped.add(blockNum);
       setTapped(newTapped);
+      audio.keyClick();
+      haptics.light();
       if (blockNum === 5) {
         setStatus('done');
+        audio.miniGameSuccess();
+        haptics.success();
         setTimeout(onComplete, 800);
       } else {
         setNextExpected(blockNum + 1);
       }
     } else {
       setStatus('error');
+      audio.miniGameFail();
+      haptics.light();
       setTimeout(() => {
         setPositions(shufflePositions());
         setNextExpected(1);
@@ -243,6 +257,8 @@ export function DecodeSignal({ onComplete, onCancel }: MiniGameProps) {
 
     if (newEntered[idx] !== pattern[idx]) {
       setStatus('error');
+      audio.miniGameFail();
+      haptics.light();
       setTimeout(() => {
         setEntered([]);
         setStatus('playing');
@@ -250,9 +266,13 @@ export function DecodeSignal({ onComplete, onCancel }: MiniGameProps) {
       return;
     }
 
+    audio.keyClick();
+    haptics.light();
     setEntered(newEntered);
     if (newEntered.length === pattern.length) {
       setStatus('done');
+      audio.miniGameSuccess();
+      haptics.success();
       setTimeout(onComplete, 800);
     }
   };
@@ -348,9 +368,13 @@ export function CrackPassword({ onComplete, onCancel }: MiniGameProps) {
   const handleSubmit = useCallback(() => {
     if (input === word) {
       setStatus('cracked');
+      audio.miniGameSuccess();
+      haptics.success();
       setTimeout(onComplete, 800);
     } else {
       setStatus('wrong');
+      audio.miniGameFail();
+      haptics.light();
       setTimeout(() => {
         setStatus('entering');
         setInput('');
