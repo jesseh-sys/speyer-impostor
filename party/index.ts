@@ -1,6 +1,6 @@
 import type * as Party from "partykit/server";
-import { GameState, Player, ClientMessage, PlayerRole, Task, PowerupType } from "../types/game";
-import { LOCATIONS, TASKS, PLAYER_ICONS, PLAYER_COLORS, GAME_CONFIG, getImpostorCount } from "../lib/gameConfig";
+import { GameState, Player, ClientMessage, PlayerRole, SpecialRole, Task, PowerupType } from "../types/game";
+import { LOCATIONS, TASKS, PLAYER_ICONS, PLAYER_COLORS, GAME_CONFIG, getImpostorCount, DEFAULT_ROLE_CONFIG, SPECIAL_ROLES } from "../lib/gameConfig";
 
 export default class GameServer implements Party.Server {
   gameState: GameState | null = null;
@@ -15,7 +15,7 @@ export default class GameServer implements Party.Server {
   private meetingStartedAt: number = 0; // When the current meeting began (for powerup pause)
   private hostId: string | null = null; // First player to join is host
   private disconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-  private lastEjection?: { playerId: string; role: PlayerRole };
+  private lastEjection?: { playerId: string; role: PlayerRole; specialRole?: SpecialRole };
   private gameTimeRemaining: number = 0; // ms remaining on game clock (paused during meetings)
   private ephemeralTimers: ReturnType<typeof setTimeout>[] = []; // sabotage/powerup timers (cleared on restart)
   private meetingsCalled: Set<string> = new Set(); // players who used their 1 emergency meeting
@@ -41,6 +41,7 @@ export default class GameServer implements Party.Server {
         ghostChat: [],
         votes: {},
         deadBodies: [],
+        roleConfig: { ...DEFAULT_ROLE_CONFIG },
       };
     }
 
@@ -106,7 +107,7 @@ export default class GameServer implements Party.Server {
     }
 
     // Validate msg.data exists for handlers that need it
-    const needsData = ['join', 'move', 'completeTask', 'kill', 'chat', 'vote', 'sabotage'];
+    const needsData = ['join', 'move', 'completeTask', 'kill', 'chat', 'vote', 'sabotage', 'roleConfig'];
     if (needsData.includes(msg.type) && !msg.data) return;
 
     switch (msg.type) {
@@ -144,6 +145,9 @@ export default class GameServer implements Party.Server {
         break;
       case 'enterSecretRoom':
         this.handleEnterSecretRoom(msg);
+        break;
+      case 'roleConfig':
+        this.handleRoleConfig(msg);
         break;
       case 'restartGame':
         this.handleRestartGame();
@@ -245,6 +249,19 @@ export default class GameServer implements Party.Server {
     this.gameState.hostId = this.hostId;
   }
 
+  handleRoleConfig(msg: ClientMessage) {
+    if (!this.gameState || this.gameState.phase !== 'lobby') return;
+    // Only host can change role config
+    if (msg.playerId !== this.hostId) return;
+    const { role, enabled } = msg.data as { role: SpecialRole; enabled: boolean };
+    if (!this.gameState.roleConfig) this.gameState.roleConfig = { ...DEFAULT_ROLE_CONFIG };
+    // Jester cannot be disabled
+    if (role === 'jester') return;
+    if (role in this.gameState.roleConfig) {
+      this.gameState.roleConfig[role] = enabled;
+    }
+  }
+
   handleStartGame() {
     if (!this.gameState) return;
 
@@ -270,9 +287,29 @@ export default class GameServer implements Party.Server {
       }
     });
 
-    // Assign tasks to innocent players
+    // Assign special roles based on roleConfig
+    if (playerCount >= 6 && this.gameState.roleConfig) {
+      const nonImpostorIds = playerIds.filter(id => !impostorIds.includes(id));
+      // Shuffle for random assignment
+      const shuffledNonImp = [...nonImpostorIds];
+      for (let i = shuffledNonImp.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledNonImp[i], shuffledNonImp[j]] = [shuffledNonImp[j], shuffledNonImp[i]];
+      }
+      let assignIdx = 0;
+      // Jester: always on when enabled and enough players
+      if (this.gameState.roleConfig.jester && assignIdx < shuffledNonImp.length) {
+        const jesterId = shuffledNonImp[assignIdx];
+        this.gameState.players[jesterId].specialRole = 'jester';
+        this.gameState.players[jesterId].totalTasks = 0;
+        assignIdx++;
+      }
+      // Other special roles will be added in Phase 4
+    }
+
+    // Assign tasks to innocent players (skip Jester — they get no tasks)
     playerIds.forEach(id => {
-      if (this.gameState && this.gameState.players[id].role === 'innocent') {
+      if (this.gameState && this.gameState.players[id].role === 'innocent' && this.gameState.players[id].specialRole !== 'jester') {
         this.assignTasks(id);
       }
     });
@@ -755,10 +792,12 @@ export default class GameServer implements Party.Server {
     // Determine ejection (but don't apply yet — wait for reveal animation)
     let ejectedPlayerId: string | undefined;
     let ejectedRole: PlayerRole | undefined;
+    let ejectedSpecialRole: SpecialRole | undefined;
     let ejectedName: string | undefined;
 
     if (!isTied && ejectedId && maxVotes >= votesNeeded && this.gameState.players[ejectedId]) {
       ejectedRole = this.gameState.players[ejectedId].role;
+      ejectedSpecialRole = this.gameState.players[ejectedId].specialRole;
       ejectedPlayerId = ejectedId;
       ejectedName = this.gameState.players[ejectedId].name;
     }
@@ -778,7 +817,7 @@ export default class GameServer implements Party.Server {
     }
 
     // Store ejection info for the results phase
-    this.lastEjection = ejectedPlayerId ? { playerId: ejectedPlayerId, role: ejectedRole! } : undefined;
+    this.lastEjection = ejectedPlayerId ? { playerId: ejectedPlayerId, role: ejectedRole!, specialRole: ejectedSpecialRole } : undefined;
 
     // Enter vote reveal phase (dramatic animation before results)
     this.gameState.phase = 'voteReveal';
@@ -786,6 +825,7 @@ export default class GameServer implements Party.Server {
       votes: voteRevealVotes,
       ejectedId: ejectedPlayerId,
       ejectedRole,
+      ejectedSpecialRole,
       ejectedName,
       noEjection: !ejectedPlayerId,
     };
@@ -799,6 +839,12 @@ export default class GameServer implements Party.Server {
         // Apply the actual ejection now
         if (ejectedPlayerId && this.gameState.players[ejectedPlayerId]) {
           this.gameState.players[ejectedPlayerId].status = 'dead';
+
+          // Jester win: ejected player with specialRole 'jester' wins immediately
+          if (this.gameState.players[ejectedPlayerId].specialRole === 'jester') {
+            this.endGame('jester');
+            return;
+          }
         }
 
         this.gameState.phase = 'results';
@@ -857,7 +903,8 @@ export default class GameServer implements Party.Server {
     }
 
     // Task win: count ALL innocents (dead + alive) so completed progress is never lost
-    const allInnocents = Object.values(this.gameState.players).filter(p => p.role === 'innocent');
+    // Exclude Jester from task win calculation (they have no tasks)
+    const allInnocents = Object.values(this.gameState.players).filter(p => p.role === 'innocent' && p.specialRole !== 'jester');
     const totalTasks = allInnocents.length * GAME_CONFIG.TASKS_PER_PLAYER;
     const completedTasks = allInnocents.reduce((sum, p) => sum + p.tasksCompleted, 0);
 
@@ -893,7 +940,7 @@ export default class GameServer implements Party.Server {
 
   private _gameTimerStartedAt: number = 0;
 
-  endGame(winner: 'innocents' | 'impostors') {
+  endGame(winner: 'innocents' | 'impostors' | 'jester') {
     if (!this.gameState) return;
 
     // Clear all timers
@@ -931,6 +978,7 @@ export default class GameServer implements Party.Server {
     // Reset all players to lobby state, keep names/icons/colors
     for (const player of Object.values(this.gameState.players)) {
       player.role = 'innocent';
+      player.specialRole = undefined;
       player.status = 'alive';
       player.location = 'speyer';
       player.tasksCompleted = 0;
@@ -992,7 +1040,7 @@ export default class GameServer implements Party.Server {
     if (gs.phase === 'gameOver') return gs; // Roles revealed at game over
     const filteredPlayers: Record<string, Player> = {};
     for (const [id, p] of Object.entries(gs.players)) {
-      filteredPlayers[id] = { ...p, role: 'innocent', powerup: undefined };
+      filteredPlayers[id] = { ...p, role: 'innocent', specialRole: undefined, powerup: undefined };
     }
     return { ...gs, players: filteredPlayers, tasks: [], ghostChat: [] };
   }
@@ -1011,23 +1059,26 @@ export default class GameServer implements Party.Server {
     const isImpostor = player.role === 'impostor';
     const isDead = player.status === 'dead';
 
-    // Filter players — hide roles and powerups of others
+    // Filter players — hide roles, specialRoles, and powerups of others
     const filteredPlayers: Record<string, Player> = {};
     for (const [id, p] of Object.entries(gs.players)) {
       if (id === playerId) {
-        filteredPlayers[id] = p; // Full info for yourself
+        filteredPlayers[id] = p; // Full info for yourself (including your own specialRole)
         continue;
       }
       const fp = { ...p };
 
       if (isDead) {
-        // Dead players see EVERYTHING: true roles, real locations, powerups
+        // Dead players see EVERYTHING: true roles, real locations, powerups, specialRoles
         // (no masking needed)
       } else {
         // Roles: impostors see each other, innocents see everyone as innocent
         if (!isImpostor) {
           fp.role = 'innocent';
         }
+
+        // Special roles: always hidden from other living players (no one knows the Jester)
+        fp.specialRole = undefined;
 
         // Shadow Walk: hide shadow-walking impostors from innocent players
         // by spoofing their location so they don't appear in "You see:" lists
@@ -1075,7 +1126,8 @@ export default class GameServer implements Party.Server {
     }
 
     // Task progress bar — show overall progress to innocents (impostors see it too for info)
-    const allInnocents = Object.values(gs.players).filter(p => p.role === 'innocent');
+    // Exclude Jester from task counts (they have no tasks)
+    const allInnocents = Object.values(gs.players).filter(p => p.role === 'innocent' && p.specialRole !== 'jester');
     const totalTasks = allInnocents.length * GAME_CONFIG.TASKS_PER_PLAYER;
     const completedTasks = allInnocents.reduce((sum, p) => sum + p.tasksCompleted, 0);
     const taskProgress = totalTasks > 0 ? { completed: completedTasks, total: totalTasks } : undefined;
@@ -1131,7 +1183,7 @@ export default class GameServer implements Party.Server {
       reportedBody: (gs.phase === 'meeting' || gs.phase === 'voting') ? this.reportedBody : undefined,
       // Include ejection result during results phase so clients can show the true role
       ejectionResult: gs.phase === 'results' && this.lastEjection
-        ? { playerId: this.lastEjection.playerId, role: this.lastEjection.role, name: gs.players[this.lastEjection.playerId]?.name || '???' }
+        ? { playerId: this.lastEjection.playerId, role: this.lastEjection.role, specialRole: this.lastEjection.specialRole, name: gs.players[this.lastEjection.playerId]?.name || '???' }
         : undefined,
       // Vote reveal data during voteReveal phase
       voteRevealData: gs.phase === 'voteReveal' ? gs.voteRevealData : undefined,

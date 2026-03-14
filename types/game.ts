@@ -4,10 +4,13 @@ export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'voting' | 'voteReveal
 
 export type PowerupType = 'sixthSense' | 'radar' | 'shield' | 'shadowWalk' | 'tracker' | 'bloodhound';
 
+export type SpecialRole = 'jester' | 'sheriff' | 'phantom' | 'shapeshifter' | 'survivor';
+
 export interface Player {
   id: string;
   name: string;
   role: PlayerRole;
+  specialRole?: SpecialRole;
   status: PlayerStatus;
   location: string;
   color: string;
@@ -65,7 +68,8 @@ export interface GameState {
     duration: number;
     startTime: number;
   };
-  winner?: 'innocents' | 'impostors';
+  roleConfig?: Record<SpecialRole, boolean>;
+  winner?: 'innocents' | 'impostors' | 'jester';
   lightsOut?: {
     until: number; // timestamp when lights come back
   };
@@ -80,11 +84,12 @@ export interface GameState {
   bloodhoundTarget?: { name: string; locationName: string; color: string };
   taskProgress?: { completed: number; total: number }; // Global task bar for innocents
   atSecretEntrance?: boolean; // Server tells client if they're at the secret entrance
-  ejectionResult?: { playerId: string; role: PlayerRole; name: string } | null; // Set during results phase
+  ejectionResult?: { playerId: string; role: PlayerRole; specialRole?: SpecialRole; name: string } | null; // Set during results phase
   voteRevealData?: {
     votes: Array<{ voterId: string; voterName: string; votedForId: string; votedForName: string; isGhost: boolean }>;
     ejectedId?: string;
     ejectedRole?: PlayerRole;
+    ejectedSpecialRole?: SpecialRole;
     ejectedName?: string;
     noEjection: boolean;
   };
@@ -101,7 +106,7 @@ export interface GameState {
   reportedBody?: { name: string; location: string; reportedBy: string }; // whose body triggered the meeting
 }
 
-export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame';
+export type ClientMessageType = 'join' | 'move' | 'completeTask' | 'kill' | 'reportBody' | 'callMeeting' | 'chat' | 'vote' | 'startGame' | 'sabotage' | 'enterSecretRoom' | 'identify' | 'restartGame' | 'roleConfig';
 
 export interface ClientMessage {
   type: ClientMessageType;

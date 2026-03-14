@@ -137,6 +137,10 @@ function VoteRevealScreen({ gameState, gameClockSeconds, divider }: {
               <p className="text-[var(--dim)] text-center text-lg tracking-wider">
                 NO CONSENSUS REACHED. THE DARKNESS PERSISTS.
               </p>
+            ) : data.ejectedSpecialRole === 'jester' ? (
+              <p className="text-[var(--amber)] text-center text-lg tracking-wider" style={{ textShadow: '0 0 10px var(--amber)' }}>
+                {data.ejectedName} WAS THE JESTER. YOU{"'"}VE BEEN FOOLED.
+              </p>
             ) : data.ejectedRole === 'impostor' ? (
               <p className="text-[var(--green)] glow-green text-center text-lg tracking-wider">
                 {data.ejectedName} WAS THE IMPOSTOR. SYSTEM INTEGRITY RESTORED.
@@ -705,7 +709,23 @@ export default function Game() {
   const roleRevealOverlay = showRoleReveal && currentPlayer && (
     <div className="fixed inset-0 z-40 bg-black flex items-center justify-center p-4">
       <div className="max-w-sm w-full text-center">
-        {currentPlayer.role === 'impostor' ? (
+        {currentPlayer.specialRole === 'jester' ? (
+          <>
+            <pre className="text-[var(--amber)] text-xs leading-tight font-mono" style={{ textShadow: '0 0 10px var(--amber)' }}>{`
+     ██╗███████╗███████╗████████╗
+     ██║██╔════╝██╔════╝╚══██╔══╝
+     ██║█████╗  ███████╗   ██║
+██   ██║██╔══╝  ╚════██║   ██║
+╚█████╔╝███████╗███████║   ██║
+ ╚════╝ ╚══════╝╚══════╝   ╚═╝
+            `.trim()}</pre>
+            <p className="text-[var(--amber)] text-2xl tracking-widest mt-3" style={{ textShadow: '0 0 10px var(--amber)' }}>
+              YOU ARE THE JESTER
+            </p>
+            <p className="text-[var(--dim)] mt-3">Get yourself voted out to win.</p>
+            <p className="text-[var(--dim)] mt-1">Trust no one — not even the truth.</p>
+          </>
+        ) : currentPlayer.role === 'impostor' ? (
           <>
             <p className="text-[var(--red)] glow-red text-4xl tracking-widest">
               IMPOSTOR
@@ -789,12 +809,24 @@ export default function Game() {
 
   if (gameState.phase === 'gameOver') {
     const allPlayers = Object.values(gameState.players);
+    const jesterPlayer = allPlayers.find(p => p.specialRole === 'jester');
     return (
       <div className="min-h-screen p-4 max-w-lg mx-auto">
 
         <div className="mt-4">
           {divider()}
-          {gameState.winner === 'innocents' ? (
+          {gameState.winner === 'jester' ? (
+            <div className="text-center">
+              <p className="text-[var(--amber)] text-2xl tracking-widest" style={{ textShadow: '0 0 15px var(--amber)' }}>
+                THE JESTER WINS
+              </p>
+              {jesterPlayer && (
+                <p className="text-[var(--amber)] text-lg mt-2" style={{ textShadow: '0 0 10px var(--amber)' }}>
+                  {jesterPlayer.name} PLAYED YOU ALL.
+                </p>
+              )}
+            </div>
+          ) : gameState.winner === 'innocents' ? (
             <div className="text-center">
               <p className="text-[var(--green)] glow-green text-2xl tracking-widest">INNOCENTS WIN</p>
               <p className="text-[var(--dim)] text-sm">The impostor has been stopped. The school is safe. For now.</p>
@@ -807,14 +839,18 @@ export default function Game() {
           )}
           {divider()}
 
-          <p className="text-lg mt-3 mb-2">ROLES REVEALED:</p>
+          <p className="text-lg mt-3 mb-2">DECLASSIFIED — ROLES REVEALED:</p>
           {allPlayers.map(p => (
             <p key={p.id} className="text-lg mb-1">
               <span style={{ color: p.color }}>{p.name}</span>
               <span className="text-[var(--dim)]"> {'.'.repeat(Math.max(1, 20 - p.name.length))} </span>
-              <span className={p.role === 'impostor' ? 'text-[var(--red)]' : 'text-[var(--green)]'}>
-                {p.role === 'impostor' ? 'IMPOSTOR' : 'INNOCENT'}
-              </span>
+              {p.specialRole === 'jester' ? (
+                <span className="text-[var(--amber)]">JESTER</span>
+              ) : (
+                <span className={p.role === 'impostor' ? 'text-[var(--red)]' : 'text-[var(--green)]'}>
+                  {p.role === 'impostor' ? 'IMPOSTOR' : 'INNOCENT'}
+                </span>
+              )}
               {p.status === 'dead' && <span className="text-[var(--dim)]"> (dead)</span>}
             </p>
           ))}
@@ -872,7 +908,11 @@ export default function Game() {
           {divider()}
 
           {ejection ? (
-            ejection.role === 'impostor' ? (
+            ejection.specialRole === 'jester' ? (
+              <p className="text-[var(--amber)] text-center text-lg mt-3 tracking-wider" style={{ textShadow: '0 0 10px var(--amber)' }}>
+                {ejection.name} WAS THE JESTER. YOU{"'"}VE BEEN FOOLED.
+              </p>
+            ) : ejection.role === 'impostor' ? (
               <p className="text-[var(--green)] glow-green text-center text-lg mt-3 tracking-wider">
                 {ejection.name} WAS THE IMPOSTOR. SYSTEM INTEGRITY RESTORED.
               </p>
@@ -1206,6 +1246,10 @@ export default function Game() {
               <p className="text-xl text-[var(--red)] glow-red">
                 {' '}ROLE: IMPOSTOR
               </p>
+            ) : currentPlayer.specialRole === 'jester' ? (
+              <p className="text-xl text-[var(--amber)]" style={{ textShadow: '0 0 8px var(--amber)' }}>
+                {' '}ROLE: JESTER
+              </p>
             ) : (
               <p className="text-xl">
                 {' '}ROLE: INNOCENT {'  '}TASKS: {currentPlayer.tasksCompleted}/{currentPlayer.totalTasks}
@@ -1297,8 +1341,17 @@ export default function Game() {
         </div>
       )}
 
+      {/* Jester mission */}
+      {currentPlayer.specialRole === 'jester' && currentPlayer.status === 'alive' && (
+        <div className="mb-4">
+          <p className="text-[var(--amber)] text-base" style={{ textShadow: '0 0 6px var(--amber)' }}>
+            MISSION: GET EJECTED. NO TASKS — JUST DECEPTION.
+          </p>
+        </div>
+      )}
+
       {/* Persistent task list */}
-      {currentPlayer.role === 'innocent' && allMyTasks.length > 0 && (
+      {currentPlayer.role === 'innocent' && currentPlayer.specialRole !== 'jester' && allMyTasks.length > 0 && (
         <div className="mb-4">
           <p className="text-[var(--dim)] text-base mb-1">{currentPlayer.status === 'dead' ? 'GHOST TASKS:' : 'YOUR TASKS:'}</p>
           {allMyTasks.map(task => {
@@ -1538,8 +1591,8 @@ export default function Game() {
             </div>
           )}
 
-          {/* Tasks here (innocent) */}
-          {currentPlayer.role === 'innocent' && myTasksHere.length > 0 && (
+          {/* Tasks here (innocent, not jester) */}
+          {currentPlayer.role === 'innocent' && currentPlayer.specialRole !== 'jester' && myTasksHere.length > 0 && (
             <div className="mb-4">
               <p className="text-lg">TASKS HERE:</p>
               {myTasksHere.map(task => (

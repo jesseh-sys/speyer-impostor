@@ -1,4 +1,4 @@
-import { Location, Task } from '@/types/game';
+import { Location, Task, SpecialRole } from '@/types/game';
 
 export const PLAYER_ICONS = ['@', '#', '$', '&', '*', '+', '!', '?', '~', '^', '%', '=', '>', '<', ':'];
 
@@ -110,6 +110,22 @@ export const GAME_CONFIG = {
   GAME_DURATION: 600,
   TASKS_PER_PLAYER: 5,
   KILL_COOLDOWN: 30,
+};
+
+export const SPECIAL_ROLES: Record<SpecialRole, { name: string; description: string; minPlayers: number }> = {
+  jester: { name: 'JESTER', description: 'Win by getting voted out. Fool them all.', minPlayers: 6 },
+  sheriff: { name: 'SHERIFF', description: 'Can investigate one player per meeting.', minPlayers: 6 },
+  phantom: { name: 'PHANTOM', description: 'Must complete tasks after death to win.', minPlayers: 6 },
+  shapeshifter: { name: 'SHAPESHIFTER', description: 'Can disguise as another player.', minPlayers: 6 },
+  survivor: { name: 'SURVIVOR', description: 'Win by surviving until the end.', minPlayers: 6 },
+};
+
+export const DEFAULT_ROLE_CONFIG: Record<SpecialRole, boolean> = {
+  jester: true,
+  sheriff: false,
+  phantom: false,
+  shapeshifter: false,
+  survivor: false,
 };
 
 export function getImpostorCount(playerCount: number): number {

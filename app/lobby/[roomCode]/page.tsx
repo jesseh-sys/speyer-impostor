@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
-import { GameState } from '@/types/game';
-import { GAME_CONFIG } from '@/lib/gameConfig';
+import { GameState, SpecialRole } from '@/types/game';
+import { GAME_CONFIG, SPECIAL_ROLES } from '@/lib/gameConfig';
 
 export default function Lobby() {
   const params = useParams();
@@ -148,6 +148,55 @@ export default function Lobby() {
           <p className="text-[var(--dim)]">  Waiting for players...</p>
         )}
       </div>
+
+      <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
+
+      {/* Role config */}
+      {gameState.roleConfig && (
+        <div className="my-3">
+          <p className="text-lg mb-1 text-[var(--green)]">ROLE CONFIG:</p>
+          {(Object.keys(SPECIAL_ROLES) as SpecialRole[]).map(role => {
+            const info = SPECIAL_ROLES[role];
+            const isEnabled = gameState.roleConfig![role];
+            const isHost = playerId === gameState.hostId;
+            const isLocked = role === 'jester';
+            return (
+              <div key={role} className="flex items-center gap-2 mb-1">
+                {isHost && !isLocked ? (
+                  <button
+                    className="bg-transparent border-none cursor-pointer text-lg"
+                    onClick={() => {
+                      socket.send(JSON.stringify({
+                        type: 'roleConfig',
+                        playerId,
+                        data: { role, enabled: !isEnabled },
+                      }));
+                    }}
+                  >
+                    <span className={isEnabled ? 'text-[var(--green)]' : 'text-[var(--dim)]'}>
+                      {isEnabled ? '[ON] ' : '[OFF]'}
+                    </span>
+                    <span className={isEnabled ? 'text-[var(--green)]' : 'text-[var(--dim)]'}>
+                      {info.name}
+                    </span>
+                  </button>
+                ) : (
+                  <span className="text-lg">
+                    <span className={isEnabled ? 'text-[var(--green)]' : 'text-[var(--dim)]'}>
+                      {isEnabled ? '[ON] ' : '[OFF]'}
+                    </span>
+                    <span className={isEnabled ? 'text-[var(--green)]' : 'text-[var(--dim)]'}>
+                      {info.name}
+                    </span>
+                    {isLocked && <span className="text-[var(--dim)]"> (locked)</span>}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          <p className="text-[var(--dim)] text-sm mt-1">Special roles require 6+ players.</p>
+        </div>
+      )}
 
       <div className="text-[var(--dim)]">{'═'.repeat(30)}</div>
 
