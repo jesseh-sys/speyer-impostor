@@ -31,12 +31,16 @@ export interface Player {
   survivorShields?: number; // Survivor role: starts with 2 shields
 }
 
+export type MiniGameType = 'hack' | 'defrag' | 'decode' | 'password';
+
 export interface Task {
   id: string;
   title: string;
   location: string;
   description: string;
   type: 'quick' | 'mini-game';
+  miniGameType?: MiniGameType;
+  isFake?: boolean;
 }
 
 export interface Location {

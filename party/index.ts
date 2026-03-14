@@ -443,6 +443,33 @@ export default class GameServer implements Party.Server {
     });
   }
 
+  // Generate deterministic fake tasks for an impostor (stable across state broadcasts)
+  generateFakeTasksForImpostor(playerId: string): Task[] {
+    // Simple seeded PRNG from playerId + roomCode for deterministic results
+    let seed = 0;
+    const seedStr = playerId + (this.gameState?.roomCode || '');
+    for (let i = 0; i < seedStr.length; i++) {
+      seed = ((seed << 5) - seed + seedStr.charCodeAt(i)) | 0;
+    }
+    const seededRandom = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+
+    // Shuffle tasks deterministically
+    const taskPool = [...TASKS];
+    for (let i = taskPool.length - 1; i > 0; i--) {
+      const j = Math.floor(seededRandom() * (i + 1));
+      [taskPool[i], taskPool[j]] = [taskPool[j], taskPool[i]];
+    }
+
+    return taskPool.slice(0, GAME_CONFIG.TASKS_PER_PLAYER).map((task, index) => ({
+      id: `${playerId}-task-${index}`,
+      ...task,
+      isFake: true,
+    }));
+  }
+
   handleMove(msg: ClientMessage) {
     if (!this.gameState || this.gameState.phase !== 'playing') return;
 
@@ -1703,8 +1730,14 @@ export default class GameServer implements Party.Server {
       filteredPlayers[id] = fp;
     }
 
-    // Tasks: only your own
-    const filteredTasks = gs.tasks.filter(t => t.id.startsWith(playerId));
+    // Tasks: only your own (innocents get real tasks, impostors get fake tasks)
+    let filteredTasks: Task[];
+    if (isImpostor && !isDead) {
+      // Generate deterministic fake tasks for impostors based on playerId + roomCode
+      filteredTasks = this.generateFakeTasksForImpostor(playerId);
+    } else {
+      filteredTasks = gs.tasks.filter(t => t.id.startsWith(playerId));
+    }
 
     // Compute sixth sense warning server-side
     const hasSixthSense = player.powerup?.type === 'sixthSense' && player.powerup.until > Date.now();

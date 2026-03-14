@@ -3,7 +3,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import usePartySocket from 'partysocket/react';
-import { GameState, Location } from '@/types/game';
+import { GameState, Location, MiniGameType } from '@/types/game';
+import { HackTerminal, DefragDrive, DecodeSignal, CrackPassword } from '../components/MiniGames';
 import {
   NarrativeTemplate,
   getTravelNarrative,
@@ -307,6 +308,12 @@ export default function Game() {
   // Shapeshifter target picker
   const [showShapeshiftPicker, setShowShapeshiftPicker] = useState(false);
 
+  // Mini-game state
+  const [activeMiniGame, setActiveMiniGame] = useState<{ type: MiniGameType; taskId: string } | null>(null);
+
+  // Fake tasks for impostors (client-side completion tracking)
+  const [completedFakeTasks, setCompletedFakeTasks] = useState<Set<string>>(new Set());
+
   // Powerup countdown tick (forces re-render for live timer)
   const [, setTick] = useState(0);
 
@@ -454,6 +461,7 @@ export default function Game() {
       pendingKillRef.current = null;
       setKillPending(false);
       setShieldBlockMsg(null);
+      setActiveMiniGame(null);
 
       if (narrative) {
         if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
@@ -668,6 +676,8 @@ export default function Game() {
     if (gameState?.phase === 'preGame') {
       roleRevealShownRef.current = false;
       setSecretRoomFound(false);
+      setCompletedFakeTasks(new Set());
+      setActiveMiniGame(null);
     }
   }, [gameState?.phase]);
 
@@ -824,12 +834,34 @@ export default function Game() {
   };
 
   const handleCompleteTask = (taskId: string) => {
-    // Send task completion immediately
-    socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } }));
-    // Show narrative as flavor
     const task = gameState?.tasks.find(t => t.id === taskId);
-    const template = getTaskNarrative(task?.title || 'Task', task?.description || '');
-    startNarrative(template, () => {}, () => {}, true);
+    if (!task) return;
+    const isFake = !!task.isFake;
+    const isMiniGame = task.type === 'mini-game' && !!task.miniGameType;
+
+    const template = getTaskNarrative(task.title || 'Task', task.description || '');
+
+    if (isMiniGame) {
+      // Narrative first, then mini-game on choice A
+      startNarrative(
+        template,
+        () => {
+          // After narrative choice A, show the mini-game
+          setActiveMiniGame({ type: task.miniGameType!, taskId });
+        },
+        () => {}, // Choice B: walk away (no-op)
+        false,
+      );
+    } else if (isFake) {
+      // Fake quick task: show narrative, mark as completed client-side
+      startNarrative(template, () => {
+        setCompletedFakeTasks(prev => new Set(prev).add(taskId));
+      }, () => {}, true);
+    } else {
+      // Real quick task: send to server immediately, show narrative as flavor
+      socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId } }));
+      startNarrative(template, () => {}, () => {}, true);
+    }
   };
 
   const handleReportBody = () => {
@@ -1031,6 +1063,41 @@ export default function Game() {
       <p className="text-[var(--green)] glow-green text-xl tracking-widest">TASK COMPLETE</p>
     </div>
   );
+
+  // ── MINI-GAME SCREEN ──────────────────────────
+
+  if (activeMiniGame) {
+    const miniGameTask = gameState?.tasks.find(t => t.id === activeMiniGame.taskId);
+    const isFakeTask = !!miniGameTask?.isFake;
+
+    const handleMiniGameComplete = () => {
+      if (isFakeTask) {
+        // Impostor: mark fake task as completed client-side
+        setCompletedFakeTasks(prev => new Set(prev).add(activeMiniGame.taskId));
+      } else {
+        // Innocent: send real completion to server
+        socket.send(JSON.stringify({ type: 'completeTask', playerId, data: { taskId: activeMiniGame.taskId } }));
+      }
+      setActiveMiniGame(null);
+    };
+
+    const handleMiniGameCancel = () => {
+      setActiveMiniGame(null);
+    };
+
+    const miniGameProps = { onComplete: handleMiniGameComplete, onCancel: handleMiniGameCancel };
+
+    return (
+      <>
+        {roleRevealOverlay}
+        {taskBanner}
+        {activeMiniGame.type === 'hack' && <HackTerminal {...miniGameProps} />}
+        {activeMiniGame.type === 'defrag' && <DefragDrive {...miniGameProps} />}
+        {activeMiniGame.type === 'decode' && <DecodeSignal {...miniGameProps} />}
+        {activeMiniGame.type === 'password' && <CrackPassword {...miniGameProps} />}
+      </>
+    );
+  }
 
   // ── NARRATIVE SCREEN ──────────────────────────
 
@@ -1654,11 +1721,11 @@ export default function Game() {
           <div className="flex-1">
             {currentPlayer.specialRole === 'shapeshifter' ? (
               <p className="text-xl text-[var(--red)] glow-red">
-                {' '}ROLE: SHAPESHIFTER
+                {' '}ROLE: SHAPESHIFTER {'  '}TASKS: {completedFakeTasks.size}/{currentPlayer.totalTasks}
               </p>
             ) : isImpostor ? (
               <p className="text-xl text-[var(--red)] glow-red">
-                {' '}ROLE: IMPOSTOR
+                {' '}ROLE: IMPOSTOR {'  '}TASKS: {completedFakeTasks.size}/{currentPlayer.totalTasks}
               </p>
             ) : currentPlayer.specialRole === 'jester' ? (
               <p className="text-xl text-[var(--amber)]" style={{ textShadow: '0 0 8px var(--amber)' }}>
@@ -1757,7 +1824,7 @@ export default function Game() {
                 const label = ROOM_ABBRS[el.id] || el.id;
                 const padded = ` ${label}${label.length < 3 ? ' ' : ''}`;
                 const isCurrent = el.id === currentPlayer.location;
-                const hasTask = allMyTasks.some(t => t.location === el.id);
+                const hasTask = allMyTasks.some(t => t.location === el.id && !completedFakeTasks.has(t.id));
                 const cls = isCurrent ? 'text-[var(--green)] glow-green' : hasTask ? 'text-[var(--green)]' : 'text-[var(--dim)]';
                 return <span key={ei} className={cls}>{isCurrent ? `[${label}]` : padded}</span>;
               })}
@@ -1850,29 +1917,33 @@ export default function Game() {
         </div>
       )}
 
-      {/* Persistent task list */}
-      {currentPlayer.role === 'innocent' && currentPlayer.specialRole !== 'jester' && allMyTasks.length > 0 && (
-        <div className="mb-4">
-          <p className="text-[var(--dim)] text-base mb-1">{currentPlayer.status === 'dead' ? 'GHOST TASKS:' : 'YOUR TASKS:'}</p>
-          {allMyTasks.map(task => {
-            const loc = gameState.locations.find(l => l.id === task.location);
-            const isHere = task.location === currentPlayer.location;
-            const nav = !isHere && currentPlayer.location
-              ? bfsNextStep(gameState.locations, currentPlayer.location, task.location)
-              : null;
-            const nextLoc = nav ? gameState.locations.find(l => l.id === nav.nextRoom) : null;
-            return (
-              <p key={task.id} className={`text-base ml-2 ${isHere ? 'text-[var(--green)]' : 'text-[var(--dim)]'}`}>
-                {isHere ? '>' : ' '} {task.title} — {loc?.name || '???'}
-                {isHere && ' [HERE]'}
-                {!isHere && nav && (
-                  <span className="text-[var(--green)]"> ({nav.hops}{nav.hops === 1 ? ' room' : ' rooms'}, go: {nextLoc?.name || '???'})</span>
-                )}
-              </p>
-            );
-          })}
-        </div>
-      )}
+      {/* Persistent task list (innocents + impostors with fake tasks) */}
+      {currentPlayer.specialRole !== 'jester' && (() => {
+        const tasksToShow = allMyTasks.filter(t => !completedFakeTasks.has(t.id));
+        if (tasksToShow.length === 0) return null;
+        return (
+          <div className="mb-4">
+            <p className="text-[var(--dim)] text-base mb-1">{currentPlayer.status === 'dead' ? 'GHOST TASKS:' : 'YOUR TASKS:'}</p>
+            {tasksToShow.map(task => {
+              const loc = gameState.locations.find(l => l.id === task.location);
+              const isHere = task.location === currentPlayer.location;
+              const nav = !isHere && currentPlayer.location
+                ? bfsNextStep(gameState.locations, currentPlayer.location, task.location)
+                : null;
+              const nextLoc = nav ? gameState.locations.find(l => l.id === nav.nextRoom) : null;
+              return (
+                <p key={task.id} className={`text-base ml-2 ${isHere ? 'text-[var(--green)]' : 'text-[var(--dim)]'}`}>
+                  {isHere ? '>' : ' '} {task.title} — {loc?.name || '???'}
+                  {isHere && ' [HERE]'}
+                  {!isHere && nav && (
+                    <span className="text-[var(--green)]"> ({nav.hops}{nav.hops === 1 ? ' room' : ' rooms'}, go: {nextLoc?.name || '???'})</span>
+                  )}
+                </p>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Active powerup */}
       {currentPlayer.powerup && currentPlayer.powerup.until > Date.now() && (
@@ -2161,21 +2232,25 @@ export default function Game() {
             );
           })()}
 
-          {/* Tasks here (innocent, not jester) */}
-          {currentPlayer.role === 'innocent' && currentPlayer.specialRole !== 'jester' && myTasksHere.length > 0 && (
-            <div className="mb-4">
-              <p className="text-lg">TASKS HERE:</p>
-              {myTasksHere.map(task => (
-                <button
-                  key={task.id}
-                  className="term-btn text-lg"
-                  onClick={() => handleCompleteTask(task.id)}
-                >
-                  {'> '}{task.title}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Tasks here (all roles except jester) */}
+          {currentPlayer.specialRole !== 'jester' && (() => {
+            const tasksHere = myTasksHere.filter(t => !completedFakeTasks.has(t.id));
+            if (tasksHere.length === 0) return null;
+            return (
+              <div className="mb-4">
+                <p className="text-lg">TASKS HERE:</p>
+                {tasksHere.map(task => (
+                  <button
+                    key={task.id}
+                    className="term-btn text-lg"
+                    onClick={() => handleCompleteTask(task.id)}
+                  >
+                    {'> '}{task.title}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Exits */}
           <div className="mb-4">
@@ -2228,21 +2303,25 @@ export default function Game() {
         <div className="mt-4">
           <p className="text-[var(--dim)] text-lg mb-4">You drift through the halls, unseen by the living.</p>
 
-          {/* Ghost tasks — can still complete tasks to help team */}
-          {currentPlayer.role === 'innocent' && myTasksHere.length > 0 && (
-            <div className="mb-4">
-              <p className="text-[var(--dim)] text-lg">GHOST TASKS HERE:</p>
-              {myTasksHere.map(task => (
-                <button
-                  key={task.id}
-                  className="term-btn text-lg text-[var(--dim)]"
-                  onClick={() => handleCompleteTask(task.id)}
-                >
-                  {'> '}{task.title}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Ghost tasks — innocents can still complete tasks to help team */}
+          {currentPlayer.role === 'innocent' && (() => {
+            const ghostTasksHere = myTasksHere.filter(t => !completedFakeTasks.has(t.id));
+            if (ghostTasksHere.length === 0) return null;
+            return (
+              <div className="mb-4">
+                <p className="text-[var(--dim)] text-lg">GHOST TASKS HERE:</p>
+                {ghostTasksHere.map(task => (
+                  <button
+                    key={task.id}
+                    className="term-btn text-lg text-[var(--dim)]"
+                    onClick={() => handleCompleteTask(task.id)}
+                  >
+                    {'> '}{task.title}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Ghost exits — instant movement, no narrative */}
           <div className="mb-4">
